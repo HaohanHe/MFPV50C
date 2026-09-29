@@ -1,0 +1,14 @@
+{
+  "required": true,
+  "package": "dev.fpv.client.mixin",
+  "compatibilityLevel": "JAVA_21",
+  "client": [
+    "GameRendererMixin",
+    "CameraMixin",
+    "LivingEntityMixin",
+    "GuiMixin"
+  ],
+  "injectors": {
+    "defaultRequire": 1
+  }
+}

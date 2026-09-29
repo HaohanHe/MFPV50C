@@ -1,0 +1,32 @@
+{
+  "schemaVersion": 1,
+  "id": "fpv",
+  "version": "${version}",
+  "name": "FPV Craft",
+  "description": "Become an FPV drone. Client-side full-attitude elytra flight with Betaflight-compatible actual rates.",
+  "authors": [
+    "BI4MIB"
+  ],
+  "contact": {},
+  "license": "MIT",
+  "icon": "assets/fpv/icon.png",
+  "environment": "client",
+  "entrypoints": {
+    "client": [
+      {
+        "adapter": "kotlin",
+        "value": "dev.fpv.client.FpvClient"
+      }
+    ]
+  },
+  "mixins": [
+    "fpv.mixins.json"
+  ],
+  "depends": {
+    "fabricloader": ">=0.19",
+    "minecraft": "~1.21.11",
+    "java": ">=21",
+    "fabric-api": "*",
+    "fabric-language-kotlin": "*"
+  }
+}
