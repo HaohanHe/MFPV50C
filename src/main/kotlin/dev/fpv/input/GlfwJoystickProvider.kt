@@ -8,7 +8,6 @@
  */
 package dev.fpv.input
 
-import dev.fpv.flight.ChannelCalib
 import dev.fpv.flight.FpvConfig
 import org.lwjgl.glfw.GLFW
 
@@ -40,7 +39,7 @@ class GlfwJoystickProvider(private val cfg: FpvConfig) : InputProvider {
         return first
     }
 
-    /** True when a USB device is currently attached (call after refresh()). */
+    /** True when a USB device is currently attached (call after refresh). */
     fun present(): Boolean = resolve() >= 0
 
     /** Refresh and expose the raw axis vector of the active device (may be empty). */
@@ -75,36 +74,48 @@ class GlfwJoystickProvider(private val cfg: FpvConfig) : InputProvider {
         ch.present = true
         ch.sourceName = deviceName
 
-        val rc = cfg.channels[StickChannels.ROLL]
-        val pc = cfg.channels[StickChannels.PITCH]
-        val yc = cfg.channels[StickChannels.YAW]
-        val tc = cfg.channels[StickChannels.THROTTLE]
+        ch.roll = readChannel(axes, StickChannels.ROLL)
+        ch.pitch = readChannel(axes, StickChannels.PITCH)
+        ch.yaw = readChannel(axes, StickChannels.YAW)
+        ch.throttle = readChannel(axes, StickChannels.THROTTLE)
 
-        fun rawOf(c: ChannelCalib): Float = if (c.axisIndex in axes.indices) axes[c.axisIndex] else 0f
-
-        ch.roll = ChannelNormalizer.centered(rawOf(rc), rc)
-        ch.pitch = ChannelNormalizer.centered(rawOf(pc), pc)
-        ch.yaw = ChannelNormalizer.centered(rawOf(yc), yc)
-        ch.throttle = if (cfg.reversible3D)
-            ChannelNormalizer.throttle3d(rawOf(tc), tc, cfg.threeDThrottleDeadband)
-        else
-            ChannelNormalizer.throttle(rawOf(tc), tc)
-
-        // Aux = every raw axis not bound to one of the four main channels.
+        // Aux is indexed by RAW axis index: bound axes read 0, unbound axes carry
+        // their raw value neutralized around the GLFW standard center. Unbound
+        // axes are uncalibrated: their travel is not assumed, only the GLFW
+        // documented center 0 and range [-1,1] are relied on (sufficient for
+        // switch triggering, which thresholds at Defaults.SWITCH_TRIGGER).
+        val aux = FloatArray(axes.size)
         val used = BooleanArray(axes.size)
-        for (c in listOf(rc, pc, yc, tc)) if (c.axisIndex in axes.indices) used[c.axisIndex] = true
-        val aux = ArrayList<Float>()
-        for (i in axes.indices) {
-            if (used[i]) continue
-            aux += ChannelNormalizer.centered(axes[i], auxCalib(i))
+        for (slot in StickSlot.entries) {
+            val ai = cfg.slotCalib[slot.ordinal].axisIndex
+            if (ai in axes.indices) used[ai] = true
         }
-        ch.aux = aux.toFloatArray()
+        for (i in axes.indices) {
+            if (!used[i]) aux[i] = axes[i]
+        }
+        ch.aux = aux
         return ch
     }
 
-    private fun auxCalib(i: Int) = ChannelCalib(
-        axisIndex = i, reversed = false, rawMin = -1f, rawMid = 0f, rawMax = 1f, deadzone = 0f,
-    )
+    /**
+     * Read one logical channel: resolve its physical slot from the current
+     * hand layout, then normalize the slot's raw axis. An unbound slot yields
+     * zero (it is never guessed).
+     */
+    private fun readChannel(axes: FloatArray, channel: Int): Float {
+        val slot = HandLayout.slot(cfg.handMode, channel)
+        val sc = cfg.slotCalib[slot.ordinal]
+        if (sc.axisIndex !in axes.indices) return 0f
+        val raw = axes[sc.axisIndex]
+        return when {
+            channel == StickChannels.THROTTLE && cfg.reversible3D ->
+                ChannelNormalizer.throttle3d(raw, sc, cfg.threeDThrottleDeadband)
+            channel == StickChannels.THROTTLE ->
+                ChannelNormalizer.throttle(raw, sc)
+            else ->
+                ChannelNormalizer.centered(raw, sc)
+        }
+    }
 
     companion object {
         /** Enumerate every currently attached joystick for the picker UI. */

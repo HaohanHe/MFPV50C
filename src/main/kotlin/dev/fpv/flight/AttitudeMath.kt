@@ -3,6 +3,9 @@
  * Clean-room quaternion attitude kinematics. Body axes: right=+X, up=+Y,
  * forward=-Z. Only the well-known rigid-body relation qdot = 0.5 q (0, w) is
  * used; no third-party flight-controller source is reproduced.
+ *
+ * The logical-axis -> body-axis mapping is read from BodyAxis (the single
+ * source of truth shared with attitude integration).
  */
 package dev.fpv.flight
 
@@ -19,20 +22,22 @@ object AttitudeMath {
      *
      * A world-space attitude post-multiplies a body-frame rotation:
      *   qNew = qOld ⊗ qDelta   =>   qDelta = conj(qOld) ⊗ qNew
-     * The short-angle axis-angle of qDelta gives w_body = axis * angle / dt.
+     * The short-angle axis-angle of qDelta gives w_body = axis * angle / dt,
+     * projected onto each logical axis via BodyAxis.
      *
      * @return [pitchNoseDownDps, rollRightDps, yawRightDps]
      */
     fun bodyRatesDps(qOld: Quaternionf, qNew: Quaternionf, dt: Float): FloatArray {
-        if (dt <= 1e-6f) return FloatArray(3)
+        val out = FloatArray(3)
+        if (dt <= 1e-6f) return out
         val qd = Quaternionf(qOld).conjugate().mul(qNew).normalize()
         unwrapShort(qd)
         val v = axisAngleVectorRad(qd)
-        return floatArrayOf(
-            toDeg(v[0] / dt),          // +X = nose down
-            toDeg(-v[2] / dt),         // roll right = rotation about -Z
-            toDeg(-v[1] / dt),         // yaw right  = rotation about -Y
-        )
+        val scale = (180.0 / (PI * dt)).toFloat()
+        for (b in BodyAxis.entries) {
+            out[b.index] = b.dot(v) * scale
+        }
+        return out
     }
 
     /**
@@ -65,6 +70,4 @@ object AttitudeMath {
         val k = 2f * half / s       // theta / sin(theta/2)
         return floatArrayOf(q.x * k, q.y * k, q.z * k)
     }
-
-    private fun toDeg(rad: Float): Float = (rad * 180.0 / PI).toFloat()
 }

@@ -5,18 +5,46 @@
  *
  * Body axes follow the camera convention: right = +X, up = +Y, forward = -Z.
  * The integrated [attitude] is a world-space rotation the camera mixin applies
- * directly.
+ * directly. Axis vectors for integration and rate measurement both come from
+ * BodyAxis, a single source of truth.
  */
 package dev.fpv.flight
 
 import dev.fpv.input.StickChannels
 import org.joml.Quaternionf
+import org.joml.Vector3f
 import kotlin.math.PI
+import kotlin.math.asin
+import kotlin.math.atan2
 
 class FlightController(val cfg: FpvConfig = FpvConfig()) {
 
     /** World-space body attitude. */
     val attitude = Quaternionf()
+
+    /** Latest commanded body rates [pitch, roll, yaw], dps (for telemetry). */
+    val setpointRates = FloatArray(3)
+
+    /** Latest measured body rates [pitch, roll, yaw], dps (for telemetry). */
+    val bodyRates = FloatArray(3)
+
+    private val spRoll = Pt3(cfg.setpointCutoffHz)
+    private val spPitch = Pt3(cfg.setpointCutoffHz)
+    private val spYaw = Pt3(cfg.setpointCutoffHz)
+    private val headfree = HeadfreeTransform()
+    private var headfreeActive = false
+
+    /** Optional inner PID rate loop (TPA / I-term relax / anti-gravity / FF). */
+    private val pidLoop = RatePidController(cfg)
+
+    /** Crash detector + leveling suggestion. */
+    private val crash = CrashRecovery()
+
+    /** True while crash recovery holds a leveling override (throttle is cut). */
+    var crashRecovering = false
+        private set
+
+    private var headAdjustWasHigh = false
 
     var ready: Boolean = false
         private set
@@ -37,7 +65,7 @@ class FlightController(val cfg: FpvConfig = FpvConfig()) {
 
     /**
      * Enter FPV mode and seed the attitude from the player's current look
-     * direction. Must match Camera.setRotation bytecode:
+     * direction. Matches the camera rotation form:
      * rotationYXZ(PI - yaw*rad, -pitch*rad, 0).
      */
     fun engage(yawDeg: Float, pitchDeg: Float) {
@@ -46,12 +74,18 @@ class FlightController(val cfg: FpvConfig = FpvConfig()) {
             -toRad(pitchDeg),
             0f,
         )
-        angle.measuredDps[0] = 0f
-        angle.measuredDps[1] = 0f
-        angle.measuredDps[2] = 0f
+        angle.measuredDps.fill(0f)
         angle.rebaseline(attitude)
         currentMode = cfg.flightMode
         modeSwitchWasHigh = false
+        headAdjustWasHigh = false
+        crashRecovering = false
+        pidLoop.reset()
+        crash.reset()
+        // Clear setpoint filters so engage/mode-switch never replays old lag.
+        spRoll.reset(); spPitch.reset(); spYaw.reset()
+        headfreeActive = false
+        headfree.unlock()
         ready = true
     }
 
@@ -59,58 +93,158 @@ class FlightController(val cfg: FpvConfig = FpvConfig()) {
         ready = false
     }
 
+    /** Failsafe LAND: force self-leveling and re-baseline the level plane. */
+    fun forceAngleMode() {
+        currentMode = FlightMode.ANGLE
+        angle.rebaseline(attitude)
+    }
+
     /**
      * Integrate one frame.
      *
      * @param ch normalized control channels (roll/pitch/yaw -1..1, throttle per mode)
      * @param dt frame time in seconds
+     * @param throttleCmd curve/limit-processed throttle used by TPA/PID (defaults
+     *        to the raw channel when not supplied)
      */
-    fun step(ch: StickChannels, dt: Float) {
+    fun step(ch: StickChannels, dt: Float, throttleCmd: Float = ch.throttle) {
         if (!ready) return
 
         handleModeSwitch(ch)
+        handleHeadAdjust(ch)
 
-        val roll = ch.roll.coerceIn(-1f, 1f)
-        val pitch = ch.pitch.coerceIn(-1f, 1f)
-        val yaw = ch.yaw.coerceIn(-1f, 1f)
+        // Headfree: on rising enable, latch the current yaw; then rotate the
+        // earth-frame roll/pitch vector into the body frame.
+        var r = ch.roll
+        var p = ch.pitch
+        if (cfg.headfreeEnabled) {
+            if (!headfreeActive) {
+                headfree.lock(currentYawDeg())
+                headfreeActive = true
+            }
+            val v = headfree.apply(r, p, currentYawDeg())
+            r = v[0]; p = v[1]
+        } else if (headfreeActive) {
+            headfree.unlock()
+            headfreeActive = false
+        }
 
-        // Commanded body rates [pitchNoseDownDps, rollRightDps, yawRightDps].
-        val cmd = FloatArray(3)
-        when (currentMode) {
-            FlightMode.ACRO -> {
-                cmd[0] = Rates.actual(pitch, cfg.pitch.center, cfg.pitch.max, cfg.pitch.expo)
-                cmd[1] = Rates.actual(roll, cfg.roll.center, cfg.roll.max, cfg.roll.expo)
-                cmd[2] = Rates.actual(yaw, cfg.yaw.center, cfg.yaw.max, cfg.yaw.expo)
+        // Third-order setpoint smoothing on roll/pitch/yaw before the rate map.
+        if (cfg.setpointSmoothingEnabled) {
+            spRoll.setCutoff(cfg.setpointCutoffHz)
+            spPitch.setCutoff(cfg.setpointCutoffHz)
+            spYaw.setCutoff(cfg.setpointCutoffHz)
+            r = spRoll.update(r, dt)
+            p = spPitch.update(p, dt)
+            val sy = spYaw.update(ch.yaw, dt)
+            // Commanded body rates, output order [pitch, roll, yaw].
+            val cmd = FloatArray(3)
+            when (currentMode) {
+                FlightMode.ACRO -> {
+                    cmd[BodyAxis.PITCH.index] =
+                        Rates.actual(p, cfg.pitch.center, cfg.pitch.max, cfg.pitch.expo)
+                    cmd[BodyAxis.ROLL.index] =
+                        Rates.actual(r, cfg.roll.center, cfg.roll.max, cfg.roll.expo)
+                    cmd[BodyAxis.YAW.index] =
+                        Rates.actual(sy, cfg.yaw.center, cfg.yaw.max, cfg.yaw.expo)
+                }
+                FlightMode.ANGLE -> {
+                    val eff = StickChannels(r, p, sy, ch.throttle, ch.aux, ch.present, ch.sourceName)
+                    val ar = angle.angleRates(eff, attitude, dt, cfg)
+                    cmd[0] = ar[0]; cmd[1] = ar[1]; cmd[2] = ar[2]
+                }
+                FlightMode.HORIZON -> {
+                    val eff = StickChannels(r, p, sy, ch.throttle, ch.aux, ch.present, ch.sourceName)
+                    val ar = angle.horizonRates(eff, attitude, dt, cfg)
+                    cmd[0] = ar[0]; cmd[1] = ar[1]; cmd[2] = ar[2]
+                }
             }
-            FlightMode.ANGLE -> {
-                val r = angle.angleRates(ch, attitude, dt, cfg)
-                cmd[0] = r[0]; cmd[1] = r[1]; cmd[2] = r[2]
+            integrate(cmd, dt, throttleCmd)
+        } else {
+            // Bypass: reset filters so re-enabling smoothing doesn't jump.
+            spRoll.reset(r); spPitch.reset(p); spYaw.reset(ch.yaw)
+            val cmd = FloatArray(3)
+            when (currentMode) {
+                FlightMode.ACRO -> {
+                    cmd[BodyAxis.PITCH.index] =
+                        Rates.actual(ch.pitch, cfg.pitch.center, cfg.pitch.max, cfg.pitch.expo)
+                    cmd[BodyAxis.ROLL.index] =
+                        Rates.actual(ch.roll, cfg.roll.center, cfg.roll.max, cfg.roll.expo)
+                    cmd[BodyAxis.YAW.index] =
+                        Rates.actual(ch.yaw, cfg.yaw.center, cfg.yaw.max, cfg.yaw.expo)
+                }
+                FlightMode.ANGLE -> {
+                    val ar = angle.angleRates(ch, attitude, dt, cfg)
+                    cmd[0] = ar[0]; cmd[1] = ar[1]; cmd[2] = ar[2]
+                }
+                FlightMode.HORIZON -> {
+                    val ar = angle.horizonRates(ch, attitude, dt, cfg)
+                    cmd[0] = ar[0]; cmd[1] = ar[1]; cmd[2] = ar[2]
+                }
             }
-            FlightMode.HORIZON -> {
-                val r = angle.horizonRates(ch, attitude, dt, cfg)
-                cmd[0] = r[0]; cmd[1] = r[1]; cmd[2] = r[2]
+            integrate(cmd, dt, throttleCmd)
+        }
+    }
+
+    /**
+     * Apply crash recovery and the optional PID rate loop, then run the
+     * attitude integration + rate measurement for one frame.
+     */
+    private fun integrate(cmd: FloatArray, dt: Float, throttleCmd: Float) {
+        // Attitude relative to level: [rollDeg positive=banked right,
+        // pitchDeg positive=nose down] - feeds the crash detector.
+        val inv = Quaternionf(attitude).conjugate()
+        val bodyUp = Vector3f(0f, 1f, 0f).rotate(inv)
+        val bodyFwd = Vector3f(0f, 0f, -1f).rotate(inv)
+        val rollLevelDeg = Math.toDegrees(atan2(bodyUp.x, bodyUp.y).toDouble()).toFloat()
+        val pitchLevelDeg = Math.toDegrees(asin((-bodyFwd.y).coerceIn(-1f, 1f)).toDouble()).toFloat()
+        val levelAtt = floatArrayOf(rollLevelDeg, pitchLevelDeg, 0f)
+
+        // Crash detection runs off the pre-PID commanded rates.
+        val crashResult = crash.update(cmd, bodyRates, levelAtt, throttleCmd, dt)
+        crashRecovering = crashResult.state == CrashResult.State.RECOVER
+        if (crashRecovering) {
+            // Leveling override: direct recovery rates, throttle cut by caller.
+            cmd[0] = crashResult.suggestedPitchRateDps
+            cmd[1] = crashResult.suggestedRollRateDps
+            cmd[2] = 0f
+        } else if (cfg.pid?.enabled == true) {
+            // Inner PID tracking loop per axis (measured = previous frame's rate).
+            for (i in 0..2) {
+                cmd[i] = pidLoop.run(i, cmd[i], bodyRates[i], throttleCmd, dt)
             }
         }
 
+        setpointRates[0] = cmd[0]; setpointRates[1] = cmd[1]; setpointRates[2] = cmd[2]
         targetRollDeg = angle.targetRollDeg
         targetPitchDeg = angle.targetPitchDeg
 
-        // Body-frame post-multiply integration (axis signs verified in ACRO).
+        // Body-frame post-multiply integration; axis vectors from BodyAxis.
         val oldAtt = Quaternionf(attitude)
-        val deltaQ = axisAngle(toRad(cmd[0] * dt), 1f, 0f, 0f)
-            .mul(axisAngle(toRad(cmd[1] * dt), 0f, 0f, -1f))
-            .mul(axisAngle(toRad(cmd[2] * dt), 0f, -1f, 0f))
+        val deltaQ = Quaternionf()
+        for (b in BodyAxis.entries) {
+            val a = b.axis
+            deltaQ.mul(Quaternionf().rotateAxis(toRad(cmd[b.index] * dt), a.x, a.y, a.z))
+        }
         attitude.mul(deltaQ).normalize()
 
-        // Measure actual motion -> next frame's D-term.
+        // Measure actual motion -> next frame's damping term.
         val m = AttitudeMath.bodyRatesDps(oldAtt, attitude, dt)
         angle.measuredDps[0] = m[0]
         angle.measuredDps[1] = m[1]
         angle.measuredDps[2] = m[2]
+        bodyRates[0] = m[0]; bodyRates[1] = m[1]; bodyRates[2] = m[2]
+    }
+
+    /** Current heading in MC yaw degrees, matching AngleController.rebaseline. */
+    private fun currentYawDeg(): Float {
+        val e = Vector3f()
+        attitude.getEulerAnglesYXZ(e)
+        return ((PI - e.y) * 180.0 / PI).toFloat()
     }
 
     /**
-     * Optional AUX-driven mode cycle. Rising edge on the channel selected by
+     * Optional AUX-driven mode cycle. Rising edge on the raw axis selected by
      * [FpvConfig.modeSwitchAxis] advances ACRO -> ANGLE -> HORIZON -> ACRO and
      * re-baselines the self-level plane (no attitude jump).
      */
@@ -121,7 +255,7 @@ class FlightController(val cfg: FpvConfig = FpvConfig()) {
             return
         }
         val v = ch.aux.getOrElse(idx) { 0f }
-        val high = v > 0.5f
+        val high = v > Defaults.SWITCH_TRIGGER
         if (high && !modeSwitchWasHigh) {
             currentMode = when (currentMode) {
                 FlightMode.ACRO -> FlightMode.ANGLE
@@ -129,12 +263,31 @@ class FlightController(val cfg: FpvConfig = FpvConfig()) {
                 FlightMode.HORIZON -> FlightMode.ACRO
             }
             angle.rebaseline(attitude)
+            pidLoop.reset()
+            crash.reset()
         }
         modeSwitchWasHigh = high
     }
 
-    private fun axisAngle(angle: Float, x: Float, y: Float, z: Float): Quaternionf =
-        Quaternionf().rotateAxis(angle, x, y, z)
+    /**
+     * Optional heading-adjust: rising edge on the raw aux axis selected by
+     * [FpvConfig.headAdjustAxis] re-latches the headfree reference heading to
+     * the current yaw (only meaningful while headfree is available).
+     */
+    private fun handleHeadAdjust(ch: StickChannels) {
+        val idx = cfg.headAdjustAxis
+        if (idx < 0) {
+            headAdjustWasHigh = false
+            return
+        }
+        val v = ch.aux.getOrElse(idx) { 0f }
+        val high = v > Defaults.SWITCH_TRIGGER
+        if (high && !headAdjustWasHigh) {
+            headfree.lock(currentYawDeg())
+            headfreeActive = true
+        }
+        headAdjustWasHigh = high
+    }
 
     private fun toRad(deg: Float): Float = (deg * PI / 180.0).toFloat()
 }

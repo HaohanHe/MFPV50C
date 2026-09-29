@@ -1,21 +1,23 @@
-﻿/*
+/*
  * FPV Craft - MIT
  * Client-side radio configuration screen (clean-room re-implementation of the
  * common receiver-setup layout: per-channel axis picker / clear / reverse /
- * live bar / auto-learn, plus hand mode, calibration, deadzone and device
- * picker). No third-party GUI library: YACL was rejected because these screens
- * need per-frame live axis values and a calibration state machine, which custom
- * rendering handles directly.
+ * live bar / auto-learn, plus hand mode, calibration, deadzone, tuning
+ * presets and device picker). No third-party GUI library: YACL was rejected
+ * because these screens need per-frame live axis values and a calibration
+ * state machine, which custom rendering handles directly.
  */
 package dev.fpv.client.gui
 
 import dev.fpv.client.FpvClient
 import dev.fpv.flight.FlightMode
+import dev.fpv.flight.TuningPreset
 import dev.fpv.flight.FpvConfig
 import dev.fpv.input.AxisLearner
-import dev.fpv.input.ChannelNormalizer
+import dev.fpv.input.HandLayout
 import dev.fpv.input.GlfwJoystickProvider
 import dev.fpv.input.StickChannels
+import dev.fpv.input.StickSlot
 import net.minecraft.client.gui.GuiGraphics
 import net.minecraft.client.gui.components.Button
 import net.minecraft.client.gui.screens.Screen
@@ -24,134 +26,153 @@ import net.minecraft.network.chat.Component
 class FpvConfigScreen(private val parent: Screen?) :
     Screen(Component.translatable("screen.fpv.config")) {
 
-    /** Logical channels shown, in display order. */
-    private data class Row(val index: Int, val labelKey: String)
-
-    private val rows = listOf(
-        Row(StickChannels.THROTTLE, "channel.fpv.throttle"),
-        Row(StickChannels.ROLL, "channel.fpv.roll"),
-        Row(StickChannels.PITCH, "channel.fpv.pitch"),
-        Row(StickChannels.YAW, "channel.fpv.yaw"),
+    /** Display order: throttle, roll, pitch, yaw. */
+    private val channels = listOf(
+        StickChannels.THROTTLE,
+        StickChannels.ROLL,
+        StickChannels.PITCH,
+        StickChannels.YAW,
     )
 
-    // Dynamic buttons, refreshed each render for their labels.
+    // Dynamic buttons, labels refreshed after every change.
     private lateinit var deviceBtn: Button
     private lateinit var handBtn: Button
     private lateinit var modeBtn: Button
     private lateinit var threeDBtn: Button
     private lateinit var deadzoneBtn: Button
     private val axisBtns = HashMap<Int, Button>()
-    private val clearBtns = HashMap<Int, Button>()
     private val revBtns = HashMap<Int, Button>()
-    private val autoBtns = HashMap<Int, Button>()
     private var modeSwitchBtn: Button? = null
     private var armBtn: Button? = null
 
-    /** Which channel the "auto learn" is currently listening for, -1 = off. */
-    private var learnTarget = -2
+    /** What auto-learn is listening for: a channel index, LEARN_* code, or OFF. */
+    private var learnTarget = OFF
     private var learnFlash = 0f
+
+    /** 0 = radio/input page, 1 = advanced (flight/battery/failsafe) page. */
+    private var page = 0
 
     private val cfg: FpvConfig get() = FpvClient.config
 
-    override fun init() {
-        val cx = width / 2
-        var y = 28
+    override fun isPauseScreen(): Boolean = false
 
-        deviceBtn = Button.builder(
-            Component.literal(""), { rebuildDeviceLabel() }
-        ).bounds(cx - 150, y, 300, 20).build()
+    override fun init() {
+        if (page == 1) {
+            buildAdvancedPage()
+            return
+        }
+        val w = width
+        // Device picker (full width).
+        deviceBtn = Button.builder(Component.literal("")) { cycleDevice() }
+            .bounds(12, 26, w - 24, 18).build()
         addRenderableWidget(deviceBtn)
-        y += 26
 
         // Channel rows.
-        val rowH = 24
-        val xLabel = 12
-        val xAxis = 92
-        val xClear = 150
-        val xRev = 170
-        val xAuto = 214
-        for (row in rows) {
-            axisBtns[row.index] = Button.builder(
-                Component.literal(""), { cycleAxis(row.index) }
-            ).bounds(xAxis, y, 54, 18).build()
-            addRenderableWidget(axisBtns[row.index]!!)
+        var y = ROW_Y0
+        for (ch in channels) {
+            axisBtns[ch] = Button.builder(Component.literal("")) { cycleAxis(ch) }
+                .bounds(X_AXIS, y, 42, 18).build()
+            addRenderableWidget(axisBtns[ch]!!)
 
-            clearBtns[row.index] = Button.builder(
-                Component.literal("X"), { cfg.channels[row.index].axisIndex = -1; refreshDynamic() }
-            ).bounds(xClear, y, 18, 18).build()
-            addRenderableWidget(clearBtns[row.index]!!)
+            addRenderableWidget(
+                Button.builder(Component.literal("X")) { clearSlot(ch) }
+                    .bounds(X_CLEAR, y, 16, 18).build()
+            )
 
-            revBtns[row.index] = Button.builder(
-                Component.literal(""), { cfg.channels[row.index].reversed = !cfg.channels[row.index].reversed; refreshDynamic() }
-            ).bounds(xRev, y, 40, 18).build()
-            addRenderableWidget(revBtns[row.index]!!)
+            revBtns[ch] = Button.builder(Component.literal("")) { toggleReverse(ch) }
+                .bounds(X_REV, y, 36, 18).build()
+            addRenderableWidget(revBtns[ch]!!)
 
-            autoBtns[row.index] = Button.builder(
-                Component.translatable("gui.fpv.auto"), { learnTarget = row.index; learnFlash = 2f }
-            ).bounds(xAuto, y, 44, 18).build()
-            addRenderableWidget(autoBtns[row.index]!!)
-            y += rowH
+            addRenderableWidget(
+                Button.builder(Component.translatable("gui.fpv.auto")) { learnTarget = ch; learnFlash = 2f }
+                    .bounds(X_AUTO, y, 34, 18).build()
+            )
+            y += ROW_H
         }
 
-        // Flight-mode switch row (binds an aux axis to cycle modes).
-        modeSwitchBtn = Button.builder(
-            Component.literal(""), { learnTarget = LEARN_MODE; learnFlash = 2f }
-        ).bounds(xAxis, y, 166, 18).build()
+        // Switch rows (mode cycle, arm).
+        modeSwitchBtn = Button.builder(Component.literal("")) { learnTarget = LEARN_MODE; learnFlash = 2f }
+            .bounds(X_AXIS, y, SWITCH_W, 18).build()
         addRenderableWidget(modeSwitchBtn!!)
-        y += rowH
+        y += ROW_H
 
-        // Arm / disarm row (placeholder binding, real handler).
-        armBtn = Button.builder(
-            Component.literal(""), { learnTarget = LEARN_ARM; learnFlash = 2f }
-        ).bounds(xAxis, y, 166, 18).build()
+        armBtn = Button.builder(Component.literal("")) { learnTarget = LEARN_ARM; learnFlash = 2f }
+            .bounds(X_AXIS, y, SWITCH_W, 18).build()
         addRenderableWidget(armBtn!!)
-        y += rowH + 6
 
-        // Right-side / bottom control cluster.
-        handBtn = Button.builder(Component.literal(""), { cycleHandMode() }).bounds(12, y, 120, 20).build()
+        // Button cluster below the crosshairs.
+        handBtn = Button.builder(Component.literal("")) { cycleHandMode() }
+            .bounds(12, Y_BTN_A, 90, 18).build()
         addRenderableWidget(handBtn)
-        y += 24
+        addRenderableWidget(
+            Button.builder(Component.translatable("gui.fpv.calibrate")) { minecraft.setScreen(CalibrationScreen(this)) }
+                .bounds(108, Y_BTN_A, 80, 18).build()
+        )
+        addRenderableWidget(
+            Button.builder(Component.translatable("gui.fpv.guided")) { minecraft.setScreen(CalibrationScreen(this)) }
+                .bounds(192, Y_BTN_A, 80, 18).build()
+        )
 
-        Button.builder(
-            Component.translatable("gui.fpv.calibrate"),
-            { minecraft.setScreen(CalibrationScreen(this)) }
-        ).bounds(12, y, 120, 20).build().let { addRenderableWidget(it) }
-
-        Button.builder(
-            Component.translatable("gui.fpv.guided"),
-            { minecraft.setScreen(CalibrationScreen(this)) }
-        ).bounds(140, y, 120, 20).build().let { addRenderableWidget(it) }
-
-        deadzoneBtn = Button.builder(Component.literal(""), { cycleDeadzone() }).bounds(268, y, 110, 20).build()
+        deadzoneBtn = Button.builder(Component.literal("")) { cycleDeadzone() }
+            .bounds(12, Y_BTN_B, 88, 18).build()
         addRenderableWidget(deadzoneBtn)
-        y += 24
-
-        modeBtn = Button.builder(Component.literal(""), { cycleFlightMode() }).bounds(12, y, 150, 20).build()
+        modeBtn = Button.builder(Component.literal("")) { cycleFlightMode() }
+            .bounds(104, Y_BTN_B, 100, 18).build()
         addRenderableWidget(modeBtn)
-
-        threeDBtn = Button.builder(Component.literal(""), { cfg.reversible3D = !cfg.reversible3D; refreshDynamic() }).bounds(168, y, 210, 20).build()
+        threeDBtn = Button.builder(Component.literal("")) { cfg.reversible3D = !cfg.reversible3D; refreshLabels() }
+            .bounds(208, Y_BTN_B, (w - 220).coerceAtLeast(70), 18).build()
         addRenderableWidget(threeDBtn)
-        y += 24
 
-        Button.builder(
-            Component.translatable("gui.fpv.reset_radio"), { resetRadioDefaults() }
-        ).bounds(12, y, 200, 20).build().let { addRenderableWidget(it) }
+        // Tuning presets, one button each (equal widths).
+        val pw = (w - 24 - 2 * GAP) / 3
+        for ((i, preset) in TuningPreset.entries.withIndex()) {
+            addRenderableWidget(
+                Button.builder(Component.translatable("gui.fpv.preset.${preset.id}")) {
+                    preset.apply(cfg); refreshLabels()
+                }.bounds(12 + i * (pw + GAP), Y_BTN_C, pw, 18).build()
+            )
+        }
 
-        Button.builder(
-            Component.translatable("gui.fpv.done"), { onClose() }
-        ).bounds(width - 112, height - 28, 100, 20).build().let { addRenderableWidget(it) }
+        // Bottom row: reset / advanced / race track / OSD editor (equal widths).
+        val bottomN = 4
+        val bottomGap = 4
+        val bottomTotal = w - 24
+        val bottomW = (bottomTotal - (bottomN - 1) * bottomGap) / bottomN
+        fun bottomAt(i: Int) = 12 + i * (bottomW + bottomGap)
 
-        refreshDynamic()
+        addRenderableWidget(
+            Button.builder(Component.translatable("gui.fpv.reset_radio")) { resetRadio() }
+                .bounds(bottomAt(0), Y_RESET, bottomW, 18).build()
+        )
+        addRenderableWidget(
+            Button.builder(Component.translatable("gui.fpv.advanced")) {
+                page = 1
+                clearWidgets()
+                init()
+            }.bounds(bottomAt(1), Y_RESET, bottomW, 18).build()
+        )
+        addRenderableWidget(
+            Button.builder(Component.translatable("gui.fpv.race")) {
+                minecraft.setScreen(dev.fpv.race.RaceScreen(this))
+            }.bounds(bottomAt(2), Y_RESET, bottomW, 18).build()
+        )
+        addRenderableWidget(
+            Button.builder(Component.translatable("gui.fpv.osd_editor")) {
+                minecraft.setScreen(OsdEditorScreen(this))
+            }.bounds(bottomAt(3), Y_RESET, bottomW, 18).build()
+        )
+        addRenderableWidget(
+            Button.builder(Component.translatable("gui.fpv.done")) { onClose() }
+                .bounds(w - 100, height - 26, 90, 18).build()
+        )
+
+        refreshLabels()
     }
 
     // ---- device picker ----
-    private fun rebuildDeviceLabel() {
+    private fun cycleDevice() {
         val devices = GlfwJoystickProvider.listJoysticks()
-        // Build the cycle list: [Keyboard] + devices.
-        val currentIsRadio = cfg.useRadio
-        val currentId = cfg.joystickId
-        // Find current position.
-        var idx = if (currentIsRadio) devices.indexOfFirst { it.id == currentId } + 1 else 0
+        var idx = if (cfg.useRadio) devices.indexOfFirst { it.id == cfg.joystickId } + 1 else 0
         if (idx < 0) idx = 0
         val next = (idx + 1) % (devices.size + 1)
         if (next == 0) {
@@ -160,64 +181,44 @@ class FpvConfigScreen(private val parent: Screen?) :
             cfg.useRadio = true
             cfg.joystickId = devices[next - 1].id
         }
-        refreshDynamic()
+        refreshLabels()
     }
 
-    private fun deviceLabel(): String {
-        if (!cfg.useRadio) return Component.translatable("gui.fpv.device_keyboard").string
-        val devices = GlfwJoystickProvider.listJoysticks()
-        val d = devices.firstOrNull { it.id == cfg.joystickId }
-        return if (d != null) "遥控器: ${d.name}" else "遥控器: (未连接)"
-    }
+    private fun deviceLabel(): String =
+        if (!cfg.useRadio) Component.translatable("gui.fpv.device_keyboard").string
+        else {
+            val d = GlfwJoystickProvider.listJoysticks().firstOrNull { it.id == cfg.joystickId }
+            if (d != null) "遥控器: ${d.name}" else "遥控器: (未连接)"
+        }
 
-    // ---- hand mode presets (physical sticks: LH=0, LV=1, RH=2, RV=3) ----
+    // ---- hand mode: remaps channels to slots, never touches raw bindings ----
     private fun cycleHandMode() {
-        cfg.handMode = when (cfg.handMode) { 1 -> 2; 2 -> 3; 3 -> 4; else -> 1 }
-        applyHandPreset(cfg.handMode)
-        refreshDynamic()
+        cfg.handMode = cfg.handMode % 4 + 1
+        refreshLabels()
     }
 
-    private fun applyHandPreset(mode: Int) {
-        // axisIndex, reversed per logical channel
-        data class P(val axis: Int, val rev: Boolean)
-        val map: Map<Int, P> = when (mode) {
-            1 -> mapOf(
-                StickChannels.ROLL to P(2, false),
-                StickChannels.PITCH to P(1, true),
-                StickChannels.YAW to P(0, false),
-                StickChannels.THROTTLE to P(3, true),
-            )
-            3 -> mapOf(
-                StickChannels.ROLL to P(0, false),
-                StickChannels.PITCH to P(3, true),
-                StickChannels.YAW to P(2, false),
-                StickChannels.THROTTLE to P(1, true),
-            )
-            4 -> mapOf(
-                StickChannels.ROLL to P(0, false),
-                StickChannels.PITCH to P(1, true),
-                StickChannels.YAW to P(2, false),
-                StickChannels.THROTTLE to P(3, true),
-            )
-            else -> mapOf( // Mode 2 (default)
-                StickChannels.ROLL to P(2, false),
-                StickChannels.PITCH to P(3, true),
-                StickChannels.YAW to P(0, false),
-                StickChannels.THROTTLE to P(1, true),
-            )
-        }
-        for ((ch, p) in map) {
-            cfg.channels[ch].axisIndex = p.axis
-            cfg.channels[ch].reversed = p.rev
-        }
-    }
+    // ---- per-channel slot actions ----
+    private fun slotOf(ch: Int): StickSlot = HandLayout.slot(cfg.handMode, ch)
 
-    private fun cycleAxis(index: Int) {
+    private fun cycleAxis(ch: Int) {
         val n = FpvClient.input.radioAxisCount().coerceAtLeast(4)
-        val cur = cfg.channels[index].axisIndex
-        val next = if (cur < 0) 0 else (cur + 1) % n
-        cfg.channels[index].axisIndex = next
-        refreshDynamic()
+        val sc = cfg.slotCalib[slotOf(ch).ordinal]
+        val cur = sc.axisIndex
+        sc.axisIndex = if (cur < 0) 0 else (cur + 1) % n
+        // Manual bind relies on the documented GLFW range until calibrated.
+        sc.learned = false
+        refreshLabels()
+    }
+
+    private fun clearSlot(ch: Int) {
+        cfg.slotCalib[slotOf(ch).ordinal].axisIndex = -1
+        refreshLabels()
+    }
+
+    private fun toggleReverse(ch: Int) {
+        val sc = cfg.slotCalib[slotOf(ch).ordinal]
+        sc.reversed = !sc.reversed
+        refreshLabels()
     }
 
     private fun cycleFlightMode() {
@@ -226,138 +227,348 @@ class FpvConfigScreen(private val parent: Screen?) :
             FlightMode.ANGLE -> FlightMode.HORIZON
             else -> FlightMode.ACRO
         }
-        refreshDynamic()
+        refreshLabels()
     }
 
     private fun cycleDeadzone() {
-        val options = floatArrayOf(0f, 0.01f, 0.02f, 0.05f, 0.10f)
-        val cur = cfg.channels[StickChannels.ROLL].deadzone
-        var i = options.indexOfFirst { it >= cur }.let { if (it < 0) options.size - 1 else it }
-        i = (i + 1) % options.size
-        for (c in cfg.channels) c.deadzone = options[i]
-        refreshDynamic()
+        val choices = dev.fpv.flight.Defaults.DEADZONE_CHOICES
+        val cur = cfg.slotCalib[StickSlot.LH.ordinal].deadzone
+        var i = choices.indexOfFirst { it >= cur }.let { if (it < 0) choices.lastIndex else it }
+        i = (i + 1) % choices.size
+        for (sc in cfg.slotCalib) sc.deadzone = choices[i]
+        refreshLabels()
     }
 
-    private fun resetRadioDefaults() {
-        cfg.useRadio = true
-        cfg.joystickId = -1
+    /** Reset bindings to the unbound state (no axis order is assumed). */
+    private fun resetRadio() {
+        for (sc in cfg.slotCalib) {
+            sc.axisIndex = -1
+            sc.reversed = false
+            sc.learned = false
+            sc.deadzone = dev.fpv.flight.Defaults.CHANNEL_DEADZONE
+        }
         cfg.handMode = 2
         cfg.reversible3D = false
-        applyHandPreset(2)
-        for (c in cfg.channels) c.deadzone = 0.02f
         cfg.modeSwitchAxis = -1
-        FpvClient.armAxis = -1
-        refreshDynamic()
+        cfg.armSwitchAxis = -1
+        FpvClient.armed = false
+        refreshLabels()
     }
 
-    private fun refreshDynamic() {
+    // ---- advanced (flight / battery / failsafe) page ----
+    private fun buildAdvancedPage() {
+        val colW = (width - 30) / 2
+        val leftX = 12
+        val rightX = width / 2 + 3
+        val rowH = 20
+
+        // left column: smoothing + throttle curve + boost + headfree
+        var y = 24
+        addToggle(leftX, y, colW, "gui.fpv.smoothing",
+            { cfg.setpointSmoothingEnabled }, { cfg.setpointSmoothingEnabled = it })
+        y += rowH
+        addCycle(leftX, y, colW, "gui.fpv.sp_cutoff",
+            { cfg.setpointCutoffHz }, { cfg.setpointCutoffHz = it },
+            floatArrayOf(15f, 20f, 30f, 40f, 60f), "%.0fHz")
+        y += rowH
+        addCycle(leftX, y, colW, "gui.fpv.thr_mid",
+            { cfg.thrMidPct }, { cfg.thrMidPct = it },
+            floatArrayOf(30f, 40f, 50f, 60f, 70f), "%.0f%%")
+        y += rowH
+        addCycle(leftX, y, colW, "gui.fpv.thr_expo",
+            { cfg.thrExpoPct }, { cfg.thrExpoPct = it },
+            floatArrayOf(0f, 10f, 20f, 30f, 40f, 50f), "%.0f%%")
+        y += rowH
+        addToggle(leftX, y, colW, "gui.fpv.boost",
+            { cfg.throttleBoostEnabled }, { cfg.throttleBoostEnabled = it })
+        y += rowH
+        addCycle(leftX, y, colW, "gui.fpv.boost_gain",
+            { cfg.boostGain }, { cfg.boostGain = it },
+            floatArrayOf(0.02f, 0.05f, 0.10f, 0.15f), "%.2f")
+        y += rowH
+        addCycle(leftX, y, colW, "gui.fpv.boost_cutoff",
+            { cfg.boostCutoffHz }, { cfg.boostCutoffHz = it },
+            floatArrayOf(10f, 15f, 25f, 40f), "%.0fHz")
+        y += rowH
+        addToggle(leftX, y, colW, "gui.fpv.headfree",
+            { cfg.headfreeEnabled }, { cfg.headfreeEnabled = it })
+        y += rowH
+        addToggle(leftX, y, colW, "gui.fpv.pid_loop",
+            { cfg.pid?.enabled ?: true }, { cfg.pid?.enabled = it })
+
+        // right column: battery + failsafe + logging + multiplayer
+        y = 24
+        addCycleI(rightX, y, colW, "gui.fpv.cells",
+            { cfg.battery?.cellCount ?: 4 }, { cfg.battery?.cellCount = it },
+            intArrayOf(3, 4, 5, 6), "%dS")
+        y += rowH
+        addCycleI(rightX, y, colW, "gui.fpv.pack_mah",
+            { cfg.battery?.packCapacityMah ?: 0 }, { cfg.battery?.packCapacityMah = it },
+            intArrayOf(0, 1300, 1500, 1800, 2200), "%s")
+        y += rowH
+        addCycle(rightX, y, colW, "gui.fpv.warn_v",
+            { cfg.battery?.warningCellV ?: 3.5f }, { cfg.battery?.warningCellV = it },
+            floatArrayOf(3.40f, 3.50f, 3.60f), "%.2fV")
+        y += rowH
+        addCycle(rightX, y, colW, "gui.fpv.crit_v",
+            { cfg.battery?.criticalCellV ?: 3.3f }, { cfg.battery?.criticalCellV = it },
+            floatArrayOf(3.20f, 3.30f, 3.40f), "%.2fV")
+        y += rowH
+        addFailsafeProc(rightX, y, colW)
+        y += rowH
+        addCycleI(rightX, y, colW, "gui.fpv.hold_ms",
+            { (cfg.failsafe?.holdMs ?: 300L).toInt() }, { cfg.failsafe?.holdMs = it.toLong() },
+            intArrayOf(200, 300, 500), "%dms")
+        y += rowH
+        addToggle(rightX, y, colW, "gui.fpv.telemetry",
+            { cfg.telemetryEnabled }, { cfg.telemetryEnabled = it })
+        y += rowH
+        addToggle(rightX, y, colW, "gui.fpv.translation",
+            { cfg.translationEnhance }, { cfg.translationEnhance = it })
+        y += rowH
+        addToggle(rightX, y, colW, "gui.fpv.allow_mp",
+            { cfg.allowTranslationMultiplayer }, { cfg.allowTranslationMultiplayer = it })
+        y += rowH
+
+        // Throttle limit: type (OFF/SCALE/CLIP) and percent.
+        addThrottleLimitType(rightX, y, colW)
+        y += rowH
+        addCycleI(rightX, y, colW, "gui.fpv.thr_limit_pct",
+            { (cfg.throttleLimit?.percent ?: 100f).toInt() },
+            { cfg.throttleLimit?.percent = it.toFloat() },
+            intArrayOf(50, 75, 90, 100), "%d%%")
+        y += rowH
+
+        addRenderableWidget(
+            Button.builder(Component.translatable("gui.fpv.back")) {
+                page = 0
+                clearWidgets()
+                init()
+            }.bounds(rightX, y, colW, 18).build()
+        )
+        addRenderableWidget(
+            Button.builder(Component.translatable("gui.fpv.done")) { onClose() }
+                .bounds(width - 100, height - 26, 90, 18).build()
+        )
+    }
+
+    private fun addToggle(x: Int, y: Int, w: Int, key: String,
+                          get: () -> Boolean, set: (Boolean) -> Unit) {
+        lateinit var btn: Button
+        btn = Button.builder(Component.literal("")) {
+            set(!get()); itRefresh(btn, key, if (get()) "gui.fpv.on" else "gui.fpv.off")
+        }.bounds(x, y, w, 18).build()
+        itRefresh(btn, key, if (get()) "gui.fpv.on" else "gui.fpv.off")
+        addRenderableWidget(btn)
+    }
+
+    private fun addCycle(x: Int, y: Int, w: Int, key: String,
+                         get: () -> Float, set: (Float) -> Unit,
+                         choices: FloatArray, fmt: String) {
+        lateinit var btn: Button
+        btn = Button.builder(Component.literal("")) {
+            val i = choices.indexOfFirst { it >= get() }.let { if (it < 0) choices.lastIndex else it }
+            set(choices[(i + 1) % choices.size])
+            itRefresh(btn, key, String.format(fmt, get()))
+        }.bounds(x, y, w, 18).build()
+        itRefresh(btn, key, String.format(fmt, get()))
+        addRenderableWidget(btn)
+    }
+
+    private fun addCycleI(x: Int, y: Int, w: Int, key: String,
+                          get: () -> Int, set: (Int) -> Unit,
+                          choices: IntArray, fmt: String) {
+        lateinit var btn: Button
+        btn = Button.builder(Component.literal("")) {
+            val i = choices.indexOfFirst { it >= get() }.let { if (it < 0) choices.lastIndex else it }
+            set(choices[(i + 1) % choices.size])
+            val v = get()
+            itRefresh(btn, key, if (key == "gui.fpv.pack_mah" && v == 0) "auto" else String.format(fmt, v))
+        }.bounds(x, y, w, 18).build()
+        val v = get()
+        itRefresh(btn, key, if (key == "gui.fpv.pack_mah" && v == 0) "auto" else String.format(fmt, v))
+        addRenderableWidget(btn)
+    }
+
+    private fun addFailsafeProc(x: Int, y: Int, w: Int) {
+        lateinit var btn: Button
+        btn = Button.builder(Component.literal("")) {
+            val cur = cfg.failsafe?.procedure ?: "DROP"
+            cfg.failsafe?.procedure = if (cur == "DROP") "LAND" else "DROP"
+            itRefresh(btn, "gui.fpv.failsafe",
+                Component.translatable(if ((cfg.failsafe?.procedure) == "DROP") "gui.fpv.failsafe_drop" else "gui.fpv.failsafe_land").string)
+        }.bounds(x, y, w, 18).build()
+        itRefresh(btn, "gui.fpv.failsafe",
+            Component.translatable(if ((cfg.failsafe?.procedure) == "DROP") "gui.fpv.failsafe_drop" else "gui.fpv.failsafe_land").string)
+        addRenderableWidget(btn)
+    }
+
+    private fun addThrottleLimitType(x: Int, y: Int, w: Int) {
+        lateinit var btn: Button
+        fun label(): String = Component.translatable(
+            "gui.fpv.thr_limit",
+            Component.translatable("gui.fpv.thr_limit_${cfg.throttleLimit?.type ?: "OFF"}"),
+        ).string
+        btn = Button.builder(Component.literal("")) {
+            val cur = cfg.throttleLimit?.type ?: "OFF"
+            val nextType = when (cur) {
+                "OFF" -> "SCALE"
+                "SCALE" -> "CLIP"
+                else -> "OFF"
+            }
+            cfg.throttleLimit?.type = nextType
+            btn.message = Component.literal(label())
+        }.bounds(x, y, w, 18).build()
+        btn.message = Component.literal(label())
+        addRenderableWidget(btn)
+    }
+
+    private fun itRefresh(btn: Button, key: String, value: String) {
+        btn.message = Component.translatable(key, value)
+    }
+
+    private fun refreshLabels() {
         deviceBtn.message = Component.literal(deviceLabel())
         handBtn.message = Component.translatable("gui.fpv.hand", cfg.handMode)
-        modeBtn.message = Component.translatable("gui.fpv.flightmode", cfg.flightMode.id)
+        modeBtn.message = Component.translatable(
+            "gui.fpv.flightmode",
+            Component.translatable("gui.fpv.mode.${cfg.flightMode.id}"),
+        )
         threeDBtn.message = Component.translatable(
             "gui.fpv.throttle_mode",
-            if (cfg.reversible3D) "3D/中点" else "普通",
+            Component.translatable(if (cfg.reversible3D) "gui.fpv.throttle_3d" else "gui.fpv.throttle_normal"),
         )
         deadzoneBtn.message = Component.translatable(
-            "gui.fpv.deadzone", String.format("%.2f", cfg.channels[StickChannels.ROLL].deadzone)
+            "gui.fpv.deadzone", String.format("%.2f", cfg.slotCalib[StickSlot.LH.ordinal].deadzone)
         )
-        for (row in rows) {
-            val c = cfg.channels[row.index]
-            axisBtns[row.index]?.message = Component.translatable(
-                "gui.fpv.axis", if (c.axisIndex < 0) "-" else "${c.axisIndex + 1}"
+        for (ch in channels) {
+            val sc = cfg.slotCalib[slotOf(ch).ordinal]
+            axisBtns[ch]?.message = Component.translatable(
+                "gui.fpv.axis", if (sc.axisIndex < 0) "-" else "${sc.axisIndex + 1}"
             )
-            revBtns[row.index]?.message = Component.translatable(
-                "gui.fpv.rev", if (c.reversed) "ON" else "OFF"
+            revBtns[ch]?.message = Component.translatable(
+                "gui.fpv.rev", Component.translatable(if (sc.reversed) "gui.fpv.on" else "gui.fpv.off")
             )
         }
         modeSwitchBtn?.message = Component.translatable(
             "gui.fpv.mode_switch", if (cfg.modeSwitchAxis < 0) "-" else "${cfg.modeSwitchAxis + 1}"
         )
         armBtn?.message = Component.translatable(
-            "gui.fpv.arm", if (FpvClient.armAxis < 0) "-" else "${FpvClient.armAxis + 1}"
+            "gui.fpv.arm_row",
+            if (cfg.armSwitchAxis < 0) "-" else "${cfg.armSwitchAxis + 1}",
+            Component.translatable(if (FpvClient.armed) "gui.fpv.armed" else "gui.fpv.disarmed"),
         )
     }
 
     // ---- rendering ----
     override fun render(g: GuiGraphics, mouseX: Int, mouseY: Int, delta: Float) {
         renderBackground(g, mouseX, mouseY, delta)
-        val raw = FpvClient.input.rawAxes()
-        val center = FloatArray(raw.size) { 0f }
-
-        // Live channel bars.
-        var y = 52
-        val barX = 266
-        val barW = (width - barX - 12).coerceAtLeast(40)
-        for (row in rows) {
-            g.drawString(font, Component.translatable(row.labelKey), 12, y + 5, 0xFFFFFF, true)
-            val c = cfg.channels[row.index]
-            val rv = if (c.axisIndex in raw.indices) raw[c.axisIndex] else 0f
-            val norm = if (row.index == StickChannels.THROTTLE && !cfg.reversible3D)
-                ChannelNormalizer.throttle(rv, c)
-            else
-                ChannelNormalizer.centered(rv, c)
-            drawBar(g, barX, y + 4, barW, norm, row.index == StickChannels.THROTTLE && !cfg.reversible3D)
-            g.drawString(font, String.format("%+.2f", norm), barX + barW + 4, y + 5, 0x55FF55, true)
-            y += 24
+        if (page == 1) {
+            g.drawCenteredString(font, Component.translatable("gui.fpv.config"), width / 2, 6, 0xFFFFFF)
+            super.render(g, mouseX, mouseY, delta)
+            return
         }
-        // skip mode-switch/arm rows' bars (they are aux switches)
-        y += 4
+        val raw = FpvClient.input.rawAxes()
+        val last = FpvClient.input.lastFrame()
 
-        // Crosshair stick visualizers (raw axes 0/1 and 2/3).
-        drawCrosshair(g, width - 150, 90, raw)
-        drawCrosshair(g, width - 70, 90, raw, offX = 2, offY = 3)
+        // Channel labels + live bars (values from the latest normalized frame).
+        var y = ROW_Y0
+        val barX = X_BAR
+        val barW = (width - barX - 36).coerceAtLeast(40)
+        val values = floatArrayOf(last.throttle, last.roll, last.pitch, last.yaw)
+        for ((i, ch) in channels.withIndex()) {
+            g.drawString(font, Component.translatable("channel.fpv.${channelKey(ch)}"), 12, y + 5, 0xFFFFFF)
+            val v = values[i]
+            val fromZero = ch == StickChannels.THROTTLE && !cfg.reversible3D
+            drawBar(g, barX, y + 6, barW, v, fromZero)
+            g.drawString(font, String.format("%+.2f", v), barX + barW + 3, y + 5, 0x55FF55)
+            y += ROW_H
+        }
+
+        // Row labels for the two switch rows.
+        g.drawString(font, Component.translatable("gui.fpv.mode_switch_label"), 12, y + 5, 0xAAAAAA)
+        y += ROW_H
+        g.drawString(font, Component.translatable("gui.fpv.arm_label"), 12, y + 5, 0xAAAAAA)
+
+        // Data-driven stick crosshairs (raw values via slot bindings).
+        drawSlotCross(g, width / 2 - 55, CROSS_CY, raw, StickSlot.LH, StickSlot.LV)
+        drawSlotCross(g, width / 2 + 55, CROSS_CY, raw, StickSlot.RH, StickSlot.RV)
 
         // Auto-learn detection.
-        if (learnTarget != -2) {
-            val detected = AxisLearner.detect(raw, center, emptySet())
+        if (learnTarget != OFF) {
+            val center = FloatArray(raw.size)
+            val detected = AxisLearner.detect(raw, center, boundAxes(raw))
             if (detected >= 0) {
                 when (learnTarget) {
                     LEARN_MODE -> cfg.modeSwitchAxis = detected
-                    LEARN_ARM -> FpvClient.armAxis = detected
-                    else -> {
-                        cfg.channels[learnTarget].axisIndex = detected
-                        // nudge reversed to a sensible default for the newly bound axis
-                    }
+                    LEARN_ARM -> cfg.armSwitchAxis = detected
+                    else -> cfg.slotCalib[slotOf(learnTarget).ordinal].axisIndex = detected
                 }
-                learnTarget = -2
+                learnTarget = OFF
                 learnFlash = 1.5f
-                refreshDynamic()
+                refreshLabels()
             }
         }
         if (learnFlash > 0f) {
             learnFlash -= delta / 20f
             g.drawCenteredString(font, Component.translatable("gui.fpv.move_stick"), width / 2, 6, 0xFFFF55)
-        } else if (learnTarget != -2) {
+        } else if (learnTarget != OFF) {
             g.drawCenteredString(font, Component.translatable("gui.fpv.listening"), width / 2, 6, 0xFFFF55)
         }
 
-        g.drawString(font, Component.translatable("gui.fpv.keyboard_section"), 12, height - 44, 0xAAAAAA, true)
+        g.drawString(font, Component.translatable("gui.fpv.keyboard_section"), 12, height - 44, 0xAAAAAA)
 
         super.render(g, mouseX, mouseY, delta)
     }
 
+    /** Raw axes already bound to any slot (excluded while learning). */
+    private fun boundAxes(raw: FloatArray): Set<Int> {
+        val used = HashSet<Int>()
+        for (sc in cfg.slotCalib) if (sc.axisIndex in raw.indices) used += sc.axisIndex
+        // When rebinding one channel, its own current axis is allowed to move.
+        if (learnTarget != LEARN_MODE && learnTarget != LEARN_ARM) {
+            val own = cfg.slotCalib[slotOf(learnTarget).ordinal].axisIndex
+            used -= own
+        }
+        return used
+    }
+
     private fun drawBar(g: GuiGraphics, x: Int, y: Int, w: Int, v: Float, fromZero: Boolean) {
-        g.fill(x, y, x + w, y + 6, 0xFF222222.toInt())
+        g.fill(x, y, x + w, y + 4, 0xFF222222.toInt())
         if (fromZero) {
             val fw = (v.coerceIn(0f, 1f) * w).toInt()
-            g.fill(x, y, x + fw, y + 6, 0xFF55FF55.toInt())
+            g.fill(x, y, x + fw, y + 4, 0xFF55FF55.toInt())
         } else {
             val cx = x + w / 2
             val dx = (v.coerceIn(-1f, 1f) * w / 2f).toInt()
-            if (dx >= 0) g.fill(cx, y, cx + dx, y + 6, 0xFF55FF55.toInt())
-            else g.fill(cx + dx, y, cx, y + 6, 0xFF55FF55.toInt())
-            g.fill(cx, y - 1, cx + 1, y + 7, 0xFFFFFFFF.toInt())
+            if (dx >= 0) g.fill(cx, y, cx + dx, y + 4, 0xFF55FF55.toInt())
+            else g.fill(cx + dx, y, cx, y + 4, 0xFF55FF55.toInt())
+            g.fill(cx, y - 1, cx + 1, y + 5, 0xFFFFFFFF.toInt())
         }
     }
 
-    /** Draw a small crosshair; dots show live raw axis [offX]/[offY]. */
-    private fun drawCrosshair(g: GuiGraphics, cx: Int, cy: Int, raw: FloatArray, offX: Int = 0, offY: Int = 1) {
-        val r = 26
+    /** Crosshair whose dot reads the raw axes bound to the given slots. */
+    private fun drawSlotCross(
+        g: GuiGraphics, cx: Int, cy: Int, raw: FloatArray,
+        hSlot: StickSlot, vSlot: StickSlot,
+    ) {
+        val r = CROSS_R
         g.fill(cx - r, cy - 1, cx + r, cy + 1, 0xFFFFFFFF.toInt())
         g.fill(cx - 1, cy - r, cx + 1, cy + r, 0xFFFFFFFF.toInt())
-        val px = if (offX in raw.indices) (raw[offX] * r).toInt() else 0
-        val py = if (offY in raw.indices) (-raw[offY] * r).toInt() else 0
+        val hc = cfg.slotCalib[hSlot.ordinal]
+        val vc = cfg.slotCalib[vSlot.ordinal]
+        val hx = if (hc.axisIndex in raw.indices) raw[hc.axisIndex] else 0f
+        val vy = if (vc.axisIndex in raw.indices) raw[vc.axisIndex] else 0f
+        val px = (hx * r).toInt()
+        val py = (-vy * r).toInt()
         g.fill(cx + px - 2, cy + py - 2, cx + px + 2, cy + py + 2, 0xFFFF5555.toInt())
+    }
+
+    private fun channelKey(ch: Int): String = when (ch) {
+        StickChannels.THROTTLE -> "throttle"
+        StickChannels.ROLL -> "roll"
+        StickChannels.PITCH -> "pitch"
+        else -> "yaw"
     }
 
     override fun onClose() {
@@ -366,7 +577,27 @@ class FpvConfigScreen(private val parent: Screen?) :
     }
 
     companion object {
+        private const val OFF = -2
         private const val LEARN_MODE = 100
         private const val LEARN_ARM = 101
+
+        // Layout tokens.
+        private const val ROW_Y0 = 48
+        private const val ROW_H = 20
+        private const val X_AXIS = 62
+        private const val X_CLEAR = 106
+        private const val X_REV = 124
+        private const val X_AUTO = 162
+        private const val X_BAR = 200
+        private const val SWITCH_W = 122
+        private const val GAP = 6
+
+        private const val CROSS_CY = 196
+        private const val CROSS_R = 24
+
+        private const val Y_BTN_A = 226
+        private const val Y_BTN_B = 250
+        private const val Y_BTN_C = 274
+        private const val Y_RESET = 298
     }
 }

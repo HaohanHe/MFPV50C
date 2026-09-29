@@ -3,8 +3,8 @@
  */
 package dev.fpv.client.mixin
 
-import dev.fpv.client.FpvClient
 import dev.fpv.client.osd.FpvOsd
+import dev.fpv.race.RaceManager
 import net.minecraft.client.DeltaTracker
 import net.minecraft.client.Minecraft
 import net.minecraft.client.gui.Gui
@@ -21,8 +21,9 @@ class GuiMixin {
     private fun fpvRenderTail(ctx: GuiGraphics, delta: DeltaTracker, ci: CallbackInfo) {
         val mc = Minecraft.getInstance()
         val player = mc.player
-        if (player != null && FpvClient.flight.ready && !mc.options.hideGui) {
+        if (player != null && !mc.options.hideGui) {
             FpvOsd.draw(ctx)
+            RaceManager.drawHud(ctx)
         }
     }
 }

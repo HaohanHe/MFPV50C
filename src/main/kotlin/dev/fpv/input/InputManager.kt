@@ -33,8 +33,11 @@ class InputManager(private val cfg: FpvConfig) {
         return last
     }
 
-    /** Raw axes of the active USB radio for the config screen / calibration. */
-    fun rawAxes(): FloatArray = if (radioActive || cfg.useRadio) radio.refreshRaw() else FloatArray(0)
+    /** Latest normalized frame without re-polling (live bars in the GUI). */
+    fun lastFrame(): StickChannels = last
+
+    /** Raw axes of the USB radio for the config screen / calibration. */
+    fun rawAxes(): FloatArray = if (cfg.useRadio) radio.refreshRaw() else FloatArray(0)
 
     fun radioAxisCount(): Int = radio.axisCount
 

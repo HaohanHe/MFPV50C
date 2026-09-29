@@ -28,6 +28,15 @@ class LivingEntityMixin {
         if (!FpvClient.flight.ready) return
 
         val cfg = FpvClient.config
+
+        // Translational physics is a client-side velocity hack: it is safe only
+        // in single-player. On multiplayer servers we bail out and let vanilla
+        // elytra physics run, unless the user explicitly opted in. The camera
+        // roll (applied by the camera mixin from the integrated attitude) is
+        // independent and keeps working either way.
+        val local = mc.isLocalServer()
+        if (!cfg.translationEnhance || (!local && !cfg.allowTranslationMultiplayer)) return
+
         var t = FpvClient.throttle
 
         // Reversible-3D: throttle is signed (-1..1, center = 0). A center

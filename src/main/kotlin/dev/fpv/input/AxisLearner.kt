@@ -1,16 +1,16 @@
 /*
  * FPV Craft - MIT
  * "Bind by moving the stick" detection: given a raw axis vector and a center
- * reference, find the single axis the user is actually moving (the one with the
- * largest deviation from center that is also beyond a threshold). Clean-room
- * heuristic inspired by common receiver-setup wizards.
+ * reference, find the single axis the user is actually moving (the one with
+ * the largest deviation from center that is also beyond a threshold).
+ * Clean-room heuristic matching common receiver-setup wizards.
  */
 package dev.fpv.input
 
-object AxisLearner {
+import dev.fpv.flight.Defaults
+import kotlin.math.abs
 
-    /** Deviation above which an axis counts as "moved". */
-    const val THRESHOLD = 0.35f
+object AxisLearner {
 
     /**
      * @param raw     current raw axis vector
@@ -20,11 +20,11 @@ object AxisLearner {
      */
     fun detect(raw: FloatArray, center: FloatArray, exclude: Set<Int>): Int {
         var best = -1
-        var bestDev = THRESHOLD
+        var bestDev = Defaults.AXIS_LEARN_THRESHOLD
         for (i in raw.indices) {
             if (i in exclude) continue
-            val mid = if (i in center.indices) center[i] else 0f
-            val dev = kotlin.math.abs(raw[i] - mid)
+            val mid = if (i in center.indices) center[i] else Defaults.RAW_RANGE_MID
+            val dev = abs(raw[i] - mid)
             if (dev > bestDev) {
                 bestDev = dev
                 best = i
