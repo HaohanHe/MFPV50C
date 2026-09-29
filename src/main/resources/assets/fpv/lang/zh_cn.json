@@ -94,5 +94,17 @@
   "cal.fpv.move_hint": "请将摇杆向两个方向打满",
   "cal.fpv.done_title": "校准完成",
   "cal.fpv.summary_row": "%s -> 轴 %s",
-  "cal.fpv.summary_skip": "%s -> 已跳过（未绑定）"
+  "cal.fpv.summary_skip": "%s -> 已跳过（未绑定）",
+
+  "screen.fpv.race": "F9U 竞速",
+  "race.fpv.start_heat": "开始比赛",
+  "race.fpv.reset": "重置",
+  "race.fpv.turtle": "反乌龟",
+  "race.fpv.penalty": "+%ss 罚时",
+  "race.fpv.ghost": "幽灵：%s",
+  "race.fpv.gate_cross": "过门 %d",
+  "race.fpv.lap": "圈 %d/%d",
+  "race.fpv.provisional": "完成圈数 - 请降落至降落区",
+  "race.fpv.finished": "完成",
+  "race.fpv.dnf": "超时 - 未完成（DNF）"
 }

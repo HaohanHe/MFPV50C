@@ -94,5 +94,17 @@
   "cal.fpv.move_hint": "Move the stick fully in both directions",
   "cal.fpv.done_title": "Calibration complete",
   "cal.fpv.summary_row": "%s -> Axis %s",
-  "cal.fpv.summary_skip": "%s -> skipped (not bound)"
+  "cal.fpv.summary_skip": "%s -> skipped (not bound)",
+
+  "screen.fpv.race": "F9U Race",
+  "race.fpv.start_heat": "START HEAT",
+  "race.fpv.reset": "Reset",
+  "race.fpv.turtle": "Turtle R",
+  "race.fpv.penalty": "+%ss Penalty",
+  "race.fpv.ghost": "Ghost: %s",
+  "race.fpv.gate_cross": "GATE %d",
+  "race.fpv.lap": "LAP %d/%d",
+  "race.fpv.provisional": "ROUND COMPLETE - LAND IN THE ZONE",
+  "race.fpv.finished": "FINISHED",
+  "race.fpv.dnf": "TIME LIMIT - INCOMPLETE (DNF)"
 }

@@ -100,6 +100,31 @@ class FlightController(val cfg: FpvConfig = FpvConfig()) {
     }
 
     /**
+     * Anti-turtle (F9U G): pilot-activated, software-only righting after a crash.
+     * Applies the shortest rotation that maps the current body-up vector back to
+     * world-up (no touch, no pre-planned path). When fully inverted the shortest
+     * arc is degenerate, so flip around the current forward axis instead.
+     */
+    fun turtleRight() {
+        if (!ready) return
+        val worldUp = Vector3f(0f, 1f, 0f)
+        val bodyUp = Vector3f(0f, 1f, 0f).rotate(attitude)
+        val dot = bodyUp.dot(worldUp)
+        if (dot > 0.995f) return // already upright
+        val flip: Quaternionf = if (dot < -0.995f) {
+            // Fully inverted: 180 degrees around current forward (-Z body).
+            val fwd = Vector3f(0f, 0f, -1f).rotate(attitude)
+            Quaternionf().fromAxisAngleRad(fwd.normalize(), Math.PI.toFloat())
+        } else {
+            val axis = bodyUp.cross(worldUp, Vector3f()).normalize()
+            val angle = Math.acos(dot.toDouble()).coerceIn(-1.0, 1.0)
+            Quaternionf().fromAxisAngleRad(axis, angle.toFloat())
+        }
+        attitude.mul(flip).normalize()
+        angle.rebaseline(attitude)
+    }
+
+    /**
      * Integrate one frame.
      *
      * @param ch normalized control channels (roll/pitch/yaw -1..1, throttle per mode)

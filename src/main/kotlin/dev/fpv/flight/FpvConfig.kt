@@ -108,9 +108,12 @@ class ThrottleLimitConfig {
     var percent = 100f
 }
 
-/** Racing core parameters (pure client, singleplayer-oriented). */
+/** Racing core parameters (pure client, singleplayer-oriented).
+ *  F9U competition-format knobs transcribed from the researched rule set; see
+ *  dev.fpv.race.F9URules for source clauses. New fields default via Gson; old
+ *  configs are repaired by FpvConfig.migrate(). */
 class RaceConfig {
-    /** Default gate opening size, blocks. */
+    /** Default gate opening size, blocks (1 m ~= 1 block). */
     var gateWidth = 3f
     var gateHeight = 3f
 
@@ -119,6 +122,28 @@ class RaceConfig {
 
     /** Replay the local best-lap ghost (Nemesis-style) while flying. */
     var ghostEnabled = true
+
+    // ---- F9U competition format (data-driven; clean-room defaults) ----
+    /** Required consecutive laps per completed round. [F9URules REQUIRED_LAPS] */
+    var requiredLaps = 3
+
+    /** Per-heat flight time limit once the clock starts, seconds. */
+    var timeLimitSec = 180
+
+    /** "TIMING_GATE": clock starts when the timing gate is crossed; "START_SIGNAL": immediately. */
+    var timingTrigger = "TIMING_GATE"
+
+    /** "AVG_BEST_3_LAPS" or "BEST_FULL_ROUND". */
+    var rankingMethod = "AVG_BEST_3_LAPS"
+
+    /** Abandon / incomplete-task penalty, seconds. */
+    var penaltySec = 30
+
+    /** Require return to the landing zone for a valid result. */
+    var requireLandingZone = true
+
+    /** Enable per-gate sector splits. */
+    var sectorsEnabled = true
 }
 
 class FpvConfig {

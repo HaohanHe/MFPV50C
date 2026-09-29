@@ -39,7 +39,11 @@ data class GateDef(
     var width: Float,
     var height: Float,
     var index: Int,
+    /** Opening shape name (render + hit-test). Default RECTANGLE for old tracks. */
+    var shape: String = "RECTANGLE",
 ) {
+    fun gateShape(): GateShape = try { GateShape.valueOf(shape) } catch (e: Exception) { GateShape.RECTANGLE }
+
     fun center(): Vec3 = Vec3(x, y, z)
 
     /** Plane normal = direction you fly through. MC look-vector convention. */
