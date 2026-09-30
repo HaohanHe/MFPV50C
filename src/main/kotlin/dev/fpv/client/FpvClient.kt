@@ -350,6 +350,13 @@ object FpvClient : ClientModInitializer {
         }
 
         battery.update(throttle, dt)
+        // Battery sag -> rpm derate (vbat/nominal). Nominal pack = cells * full cell.
+        run {
+            val af = config.activeAirframe()
+            val nomCells = af.effectiveCellCount(config.activeBattery().cellCount)
+            val nominalV = nomCells * Defaults.VBAT_FULL_CELL
+            flight.batteryDerate = if (nominalV > 0.1f) battery.vbat / nominalV else 1f
+        }
 
         if (flight.ready) flightTimeSec += dt
 

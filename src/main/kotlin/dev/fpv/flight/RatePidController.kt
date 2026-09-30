@@ -103,7 +103,7 @@ class RatePidController(private val cfg: FpvConfig) {
     }
 
     /**
-     * Run one axis for one frame.
+     * Run one axis for one frame (ARCADE / virtual plant).
      *
      * @param axisIndex 0 = pitch, 1 = roll, 2 = yaw
      * @param setpointDps commanded body rate, deg/s (after rates mapping + smoothing)
@@ -119,7 +119,44 @@ class RatePidController(private val cfg: FpvConfig) {
         throttle: Float,
         dt: Float,
     ): Float {
-        val pidCfg = cfg.pid ?: return setpointDps
+        val weightedSetpoint = sanitize(setpointDps) * (cfg.pid?.setpointWeight ?: 1f)
+        val sum = computeSum(axisIndex, setpointDps, measuredDps, throttle, dt)
+        val out = weightedSetpoint + SUM_TO_DPS * sum
+        return sanitize(out.coerceIn(-OUTPUT_CLAMP_DPS, OUTPUT_CLAMP_DPS))
+    }
+
+    /**
+     * Run one axis for one frame (REAL plant, P-D). Returns the PID *sum*
+     * normalized by its axis clamp, i.e. a demanded differential motor command
+     * in [-1,1] that the Quad-X mixer spreads across the four motors. This is
+     * the Betaflight-style "pid sum -> motor differential" path; there is no
+     * dps feedthrough because the rigid-body plant itself integrates torque.
+     */
+    fun runDifferential(
+        axisIndex: Int,
+        setpointDps: Float,
+        measuredDps: Float,
+        throttle: Float,
+        dt: Float,
+    ): Float {
+        val sum = computeSum(axisIndex, setpointDps, measuredDps, throttle, dt)
+        val sumLimit = if (axisIndex == 2) SUM_LIMIT_YAW else SUM_LIMIT_RP
+        return (sum / sumLimit).coerceIn(-1f, 1f)
+    }
+
+    /**
+     * Shared inner loop: P on (weighted setpoint - gyro), I-term with relax +
+     * anti-gravity, D on the gyro through a dynamic LPF, setpoint feed-forward,
+     * TPA. Returns the clamped internal pid sum.
+     */
+    private fun computeSum(
+        axisIndex: Int,
+        setpointDps: Float,
+        measuredDps: Float,
+        throttle: Float,
+        dt: Float,
+    ): Float {
+        val pidCfg = cfg.pid ?: return 0f
         val axis = axes[axisIndex.coerceIn(0, 2)]
 
         // Defensive sanitization: never let NaN/Inf poison the integrator.
@@ -177,18 +214,15 @@ class RatePidController(private val cfg: FpvConfig) {
             else -> Unit // OFF
         }
 
-        // 7. Sum, clamp in internal units, convert to dps and add feedthrough.
+        // 7. Sum and clamp in internal units.
         var sum = pTerm + axis.iTerm + dTerm + fTerm
         val sumLimit = if (axisIndex == 2) SUM_LIMIT_YAW else SUM_LIMIT_RP
         if (sum > sumLimit) sum = sumLimit else if (sum < -sumLimit) sum = -sumLimit
 
-        val out = weightedSetpoint + SUM_TO_DPS * sum
-        val clamped = out.coerceIn(-OUTPUT_CLAMP_DPS, OUTPUT_CLAMP_DPS)
-
         axis.prevMeasured = meas
         axis.prevSetpoint = weightedSetpoint
         axis.hasHistory = true
-        return sanitize(clamped)
+        return sanitize(sum)
     }
 
     /**

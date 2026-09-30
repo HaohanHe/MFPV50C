@@ -6,6 +6,37 @@ Semantic Versioning; `main` is the development branch and `stable` points at the
 latest fully verified (zero-warning build + all verification scripts PASS)
 revision. No formal GitHub Release is published until real-hardware acceptance.
 
+## [Unreleased] — P-D rotational realism (motor lag + rigid-body inertia)
+
+### Added
+- **Real vs Arcade rotational physics switch** (`FpvConfig.physicsRealism`,
+  "REAL"/"ARCADE"), data-driven, persisted, toggled on the Advanced config page.
+  ARCADE keeps the legacy near-instant tracked-rate path (old feel).
+- **`dev.fpv.flight.RealDynamics`** — a Minecraft-free, headless-testable rigid-body
+  plant: setpoint dps → PID (or simple P) differential → Quad-X mixer
+  (`MixerTables`) → 4 motor commands → motor first-order lag `tau*dm/dt = -m+sqrt(u)`
+  → per-motor thrust `maxThrustPerMotorN*m^2*batteryDerate` and reaction torque
+  `reactionTorquePerMotorNm*m^2` → lever-arm roll/pitch/yaw moments → rigid-body
+  Euler equation `I*w_dot = tau - w x (I w) - rotDamp*w` → actual body dps.
+  Clean-room rigid-body math modeled on the public gym-pybullet-drones / drone-models
+  quadrotor equations (MIT); the PID→motor-differential path is a clean-room rewrite
+  of the published Betaflight structure (no GPL source text copied).
+- New airframe fields (all tunable, engineering starting values pending real-machine
+  tuning): `motorTauSec`, `armLength`, `reactionTorquePerMotorNm`, `rpmMaxPerMotor`,
+  `differentialAuthority`, `simpleRatePGain`, `rotDampXX/YY/ZZ`, `hoverThrottle` +
+  `autoHoverThrottle()`; derived `kf()`/`km()`.
+- `RatePidController.runDifferential()`: returns the clamped pid sum normalized to a
+  [-1,1] motor differential (Betaflight-style sum→motor mix) for the REAL plant; the
+  ARCADE `run()` path is unchanged.
+- Battery sag now derates the real motor plant (`FlightController.batteryDerate =
+  vbat/nominalV`).
+
+### Headless verification (StageResponseTest, plain JVM)
+- Real pitch 200 dps step: rise ≈52 ms, single ≈24% overshoot, settles to 200 dps
+  (non-instant, weighty). Doubling inertia raises rise 52→70 ms (heavier = slower).
+  Roll/yaw sign correct; 20k-step random input stays finite and bounded; ARCADE path
+  remains near-instant. All PASS.
+
 ## [Unreleased] — Safety net (config safety, runtime guards, traceability)
 
 ### Added

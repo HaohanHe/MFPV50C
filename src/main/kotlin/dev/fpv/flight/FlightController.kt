@@ -44,6 +44,17 @@ class FlightController(val cfg: FpvConfig = FpvConfig()) {
     /** Optional inner PID rate loop (TPA / I-term relax / anti-gravity / FF). */
     private val pidLoop = RatePidController(cfg)
 
+    /** Real (P-D) rigid-body plant, used when cfg.physicsRealism == "REAL". */
+    private val realDynamics = RealDynamics(cfg, pidLoop)
+
+    /**
+     * Battery voltage derate 0..1 (vbat/vNominal), fed by the client each frame.
+     * High throttle sags the pack -> lower rpm -> less thrust/reaction torque.
+     * Headless callers can leave this at 1.0.
+     */
+    @JvmField
+    var batteryDerate: Float = 1f
+
     /** Crash detector + leveling suggestion. */
     private val crash = CrashRecovery()
 
@@ -95,6 +106,7 @@ class FlightController(val cfg: FpvConfig = FpvConfig()) {
         headAdjustWasHigh = false
         crashRecovering = false
         pidLoop.reset()
+        realDynamics.reset()
         crash.reset()
         // Clear setpoint filters so engage/mode-switch never replays old lag.
         spRoll.reset(); spPitch.reset(); spYaw.reset()
@@ -278,8 +290,9 @@ class FlightController(val cfg: FpvConfig = FpvConfig()) {
             cmd[0] = crashResult.suggestedPitchRateDps
             cmd[1] = crashResult.suggestedRollRateDps
             cmd[2] = 0f
-        } else if (cfg.pid?.enabled == true) {
+        } else if (cfg.physicsRealism != "REAL" && cfg.pid?.enabled == true) {
             // Inner PID tracking loop per axis (measured = previous frame's rate).
+            // In REAL mode the plant's own rate loop lives inside RealDynamics.
             for (i in 0..2) {
                 cmd[i] = pidLoop.run(i, cmd[i], bodyRates[i], throttleCmd, dt)
             }
@@ -289,6 +302,13 @@ class FlightController(val cfg: FpvConfig = FpvConfig()) {
         targetRollDeg = angle.targetRollDeg
         targetPitchDeg = angle.targetPitchDeg
 
+        if (cfg.physicsRealism == "REAL") {
+            // ---- P-D rigid-body plant: motor lag + inertia integration ----
+            // The plant owns its motor + gyro state and returns the actual body
+            // rates; we then integrate those into the attitude quaternion below.
+            val actual = realDynamics.step(cmd, thr, dt, batteryDerate)
+            for (i in 0..2) trackedRates[i] = if (actual[i].isFinite()) actual[i] else 0f
+        } else {
         // ---- Airframe inertia / angularDrag first-order body-rate tracking ----
         // Plant: I*dω/dt = b*(ωcmd - ω) => ω follows the command with time
         // constant tau = I / angularDrag. Default tau is ~5 ms (near-instant,
@@ -325,6 +345,7 @@ class FlightController(val cfg: FpvConfig = FpvConfig()) {
             trackedRates[0] += (18f * kotlin.math.sin(2.0 * Math.PI * 27.0 * simTime)).toFloat()
             trackedRates[1] += (14f * kotlin.math.sin(2.0 * Math.PI * 31.0 * simTime + 0.7)).toFloat()
         }
+        } // end ARCADE tracking branch
 
         // Body-frame post-multiply integration; axis vectors from BodyAxis.
         // Integrate the tracked (actual) rates, not the commanded ones. Guard

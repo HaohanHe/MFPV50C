@@ -87,6 +87,13 @@ class AirframeProfile {
      */
     var minThrottle: Float = 0.055f
 
+    /**
+     * Hover throttle 0..1; 0.0 = auto-solve mg = totalThrustN(t) (see
+     * [autoHoverThrottle]). Level attitude + this collective -> net vertical
+     * force ~0. Consumed by translational hover physics + GUI readout.
+     */
+    var hoverThrottle: Float = 0.0f
+
     // ---- Multi-point throttle shaping (applied in ThrottleCurve) ----
     /** Gain multiplier at raw throttle 0. */
     var thrLow: Float = 0.95f
@@ -161,6 +168,56 @@ class AirframeProfile {
     /** Angular drag about the roll axis. */
     var angularDragZZ: Float = 0.36f
 
+    // ---- Real rotational plant (P-D: motor lag + rigid-body inertia) ----
+    /**
+     * Motor (rotor) first-order lag time constant, seconds. The normalized
+     * motor speed m tracks sqrt(command) via tau*dm/dt = -m + sqrt(u):
+     *   m += (dt/(tau+dt)) * (sqrt(u) - m). Engineering default 0.03 s; tune.
+     */
+    var motorTauSec: Float = Defaults.MOTOR_TAU_SEC
+
+    /**
+     * CG-to-motor arm length, metres (X diagonal). The per-motor lever arms
+     * are +/- armLength/sqrt(2) on both the roll(x) and pitch(z) axes.
+     * Consumed by RealDynamics to turn thrust differences into roll/pitch moments.
+     */
+    var armLength: Float = Defaults.ARM_LENGTH_M
+
+    /**
+     * Peak reaction (counter-torque) per motor at full rpm, N·m. This is
+     * km * rpmMax^2; the per-motor reaction torque scales with m^2 and its
+     * sign follows the Quad-X spin table (MixerTables yaw column). Consumed for yaw.
+     */
+    var reactionTorquePerMotorNm: Float = Defaults.REACTION_TORQUE_PER_MOTOR_NM
+
+    /** No-load motor rpm at nominal pack voltage. Only used to express kf/km as
+     * physical coefficients; the plant tracks normalized m = rpm/rpmMax. */
+    var rpmMaxPerMotor: Float = Defaults.RPM_MAX_PER_MOTOR
+
+    /**
+     * Differential mixing authority: how far (normalized motor fraction) a full
+     * +/-1 PID differential shifts an individual motor command. Chosen so the
+     * hover command keeps headroom within [0,1].
+     */
+    var differentialAuthority: Float = Defaults.DIFFERENTIAL_AUTHORITY
+
+    /** Fallback proportional rate gain (1/deg/s of error) when the inner PID
+     * loop is disabled. Consumed by RealDynamics only. */
+    var simpleRatePGain: Float = Defaults.SIMPLE_RATE_P_GAIN
+
+    // ---- Real rotational viscous damping (N·m·s), distinct from ARCADE tracking ----
+    /**
+     * Viscous rotational damping about the pitch axis (N·m·s) in the RIGID-BODY
+     * plant:  Ix*wx_dot = ... - rotDampXX*wx. Real FPV airframes have small
+     * aerodynamic rotor damping; these are engineering starting values, NOT the
+     * ARCADE angularDragXX tracking coefficient.
+     */
+    var rotDampXX: Float = Defaults.ROTDAMP_XX
+    /** Viscous rotational damping about the yaw axis. */
+    var rotDampYY: Float = Defaults.ROTDAMP_YY
+    /** Viscous rotational damping about the roll axis. */
+    var rotDampZZ: Float = Defaults.ROTDAMP_ZZ
+
     // ---- Centre-of-gravity offset, metres (body frame) ----
     /** Thrust-line offset from CG; produces a pitch/yaw moment under power. */
     var cgOffsetX: Float = 0.0f
@@ -181,6 +238,35 @@ class AirframeProfile {
         val x = t.coerceIn(0f, 1f)
         return (thrustLinear * x + thrustQuad * x * x).coerceAtLeast(0f)
     }
+
+    // ---- Derived propulsion coefficients (physical units, for transparency) ----
+    /** Thrust coefficient kf = maxThrustPerMotorN / rpmMax^2  (N·s^2/rad^2 -> N/rpm^2). */
+    fun kf(): Float = maxThrustPerMotorN / (rpmMaxPerMotor * rpmMaxPerMotor).coerceAtLeast(1f)
+
+    /** Reaction-torque coefficient km = reactionTorquePerMotorNm / rpmMax^2. */
+    fun km(): Float = reactionTorquePerMotorNm / (rpmMaxPerMotor * rpmMaxPerMotor).coerceAtLeast(1f)
+
+    /**
+     * Hover throttle t_h (0..1): the normalized collective command at which
+     * totalThrustN(t_h) == m*g on a level craft. Solves the thrust law
+     *   thrustLinear*t + thrustQuad*t^2 = (m*g) / (motorCount*maxThrustPerMotorN)
+     * clamped to [0,1]. Airmarked value 0.0 means "auto" (call this).
+     */
+    fun autoHoverThrottle(): Float {
+        val tMax = motorCount * maxThrustPerMotorN
+        if (tMax <= 1e-6f) return 0f
+        val target = (massKg * gravity) / tMax
+        // Solve thrustQuad*t^2 + thrustLinear*t - target = 0.
+        if (thrustQuad <= 1e-6f) return (target / thrustLinear).coerceIn(0f, 1f)
+        val disc = thrustLinear * thrustLinear + 4f * thrustQuad * target
+        if (disc < 0f) return 0f
+        val t = (-thrustLinear + Math.sqrt(disc.toDouble()).toFloat()) / (2f * thrustQuad)
+        return t.coerceIn(0f, 1f)
+    }
+
+    /** Effective hover throttle: the configured value when >0, else the auto solve. */
+    fun effectiveHoverThrottle(): Float =
+        if (hoverThrottle > 0f) hoverThrottle.coerceIn(0f, 1f) else autoHoverThrottle()
 
     /** Rotational first-order time constant, seconds, for the given axis. */
     fun tauSec(axis: BodyAxis): Float = when (axis) {

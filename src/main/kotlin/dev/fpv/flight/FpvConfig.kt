@@ -419,6 +419,13 @@ class FpvConfig {
     /** Allow the translational physics on multiplayer servers (off by default: safety). */
     var allowTranslationMultiplayer = Defaults.ALLOW_TRANSLATION_MULTIPLAYER
 
+    /**
+     * Rotational physics model: "REAL" (motor first-order lag + rigid-body
+     * inertia plant, see dev.fpv.flight.RealDynamics) or "ARCADE" (the legacy
+     * near-instant tracked-rate path). Data-driven, persisted, GUI-switchable.
+     */
+    var physicsRealism: String = Defaults.PHYSICS_REALISM
+
     /** Calibration for the slot of logical [channel] under the current hand mode. */
     fun calibFor(channel: Int): SlotCalib =
         slotCalib[dev.fpv.input.HandLayout.slot(handMode, channel).ordinal]

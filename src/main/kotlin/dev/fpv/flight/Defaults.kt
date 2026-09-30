@@ -132,6 +132,40 @@ object Defaults {
      *  disabled for direct (ideal) rate integration. */
     const val PID_ENABLED = true
 
+    // ---- Physics realism switch (P-D) ----
+    /** "REAL" = motor first-order lag + rigid-body inertia angular plant;
+     *  "ARCADE" = legacy near-instant tracked-rate path. Data-driven + GUI-switchable. */
+    const val PHYSICS_REALISM = "REAL"
+
+    /** Motor (rotor) first-order lag time constant, seconds. Real brushless+ESC
+     *  response is tens of ms; 0.03 is an engineering starting value to tune. */
+    const val MOTOR_TAU_SEC = 0.03f
+
+    /** CG-to-motor arm (half-diagonal) length, metres. 5" class ~0.10-0.11 m.
+     *  Engineering starting value, not a sourced number. */
+    const val ARM_LENGTH_M = 0.105f
+
+    /** Reaction torque per motor at full rpm, N·m (yaw authority). km·rpmMax^2.
+     *  Engineering starting value pending real-machine tuning. */
+    const val REACTION_TORQUE_PER_MOTOR_NM = 0.08f
+
+    /** Normalised motor speed (rpm/rpmMax) at nominal voltage; 4S ~22-26k rpm. */
+    const val RPM_MAX_PER_MOTOR = 24000f
+
+    /** How far (in motor fraction) a full PID differential shifts a motor command.
+     *  Keeps the hover motor command within [0,1] under full differential. Tuned
+     *  headless so a rate step has ~50-90ms rise with a single mild overshoot. */
+    const val DIFFERENTIAL_AUTHORITY = 0.22f
+
+    /** Rigid-body viscous rotational damping (N·m·s), engineering starting values. */
+    const val ROTDAMP_XX = 0.070f
+    const val ROTDAMP_YY = 0.040f
+    const val ROTDAMP_ZZ = 0.055f
+
+    /** Simple proportional rate gain used when the inner PID loop is disabled
+     *  (1/deg per second of error); engineering starting value. */
+    const val SIMPLE_RATE_P_GAIN = 0.004f
+
     // ---- OSD artificial horizon / pitch ladder (synthetic instrument) ----
     /** Vertical pixels per degree of pitch for the horizon group. */
     const val OSD_PITCH_PX_PER_DEG = 2.0f

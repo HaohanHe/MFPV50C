@@ -319,6 +319,24 @@ class FpvConfigScreen(private val parent: Screen?) :
         y += rowH
         addToggle(leftX, y, colW, "gui.fpv.pid_loop",
             { cfg.pid?.enabled ?: true }, { cfg.pid?.enabled = it })
+        y += rowH
+        // Rotational physics model: REAL (motor lag + rigid-body inertia) vs ARCADE.
+        run {
+            lateinit var btn: Button
+            fun label(): String = Component.translatable(
+                "gui.fpv.physics",
+                Component.translatable(
+                    if (cfg.physicsRealism == "REAL") "gui.fpv.physics_real"
+                    else "gui.fpv.physics_arcade"),
+            ).string
+            btn = Button.builder(Component.literal("")) {
+                cfg.physicsRealism = if (cfg.physicsRealism == "REAL") "ARCADE" else "REAL"
+                btn.message = Component.literal(label())
+            }.bounds(leftX, y, colW, 18).build()
+            btn.message = Component.literal(label())
+            addRenderableWidget(btn)
+        }
+        y += rowH
 
         // right column: battery + failsafe + logging + multiplayer
         y = 24
