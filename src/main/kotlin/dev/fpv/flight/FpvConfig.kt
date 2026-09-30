@@ -497,6 +497,31 @@ class FpvConfig {
             activeAirframeName = airframes.first().name
         // auxChannels and device profiles have non-null initializers; Gson
         // leaves them empty for older configs predating the data-driven lists.
+
+        // One-time migration (schema 1 -> 2): an older profile created for a
+        // KNOWN device before the arm/modes seeding existed kept armButton=-1 and
+        // no ARM routing row, so arm fell back to the legacy SA axis while SA was
+        // ALSO the legacy mode-cycle axis (arming jumped into Angle). Re-apply the
+        // known-device seed ONLY for that old-default fingerprint, and decouple
+        // the legacy top-level indices, without touching explicit user edits.
+        var repairedKnown = false
+        for (p in profiles) {
+            val known = KnownDevices.match(p.modelName) ?: continue
+            val hasArmRow = p.modes.any { it.function == FlightFunction.ARM.id }
+            if (p.armButton < 0 && !hasArmRow) {
+                KnownDevices.apply(p, known)
+                repairedKnown = true
+            }
+        }
+        if (repairedKnown) {
+            armSwitchAxis = -1
+            modeSwitchAxis = -1
+            profiles.firstOrNull { KnownDevices.match(it.modelName) != null }?.let {
+                if (it.armButton >= 0) armButtonIndex = it.armButton
+            }
+        }
+
+        schemaVersion = Defaults.CONFIG_SCHEMA_VERSION
     }
 
     // ---- Persistence ----

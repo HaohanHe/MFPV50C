@@ -32,6 +32,20 @@ revision. No formal GitHub Release is published until real-hardware acceptance.
   120 Hz recording cost and all real-transmitter behaviour still require local
   hardware verification (annotated in code).
 
+### Fixed
+- **ANGLE pitch positive feedback (camera "spasm"/neck snapping back):** the
+  body-frame attitude error hand-typed the pitch sign backwards, so a nose-up
+  disturbance fed back and flipped the craft. The error is now projected through
+  the same `BodyAxis` table used by rate measurement (single source of truth).
+  A headless simulation confirms roll and pitch (nose-up/down) 20° disturbances
+  converge monotonically to ~0 in ANGLE and HORIZON.
+- **Arming used SA instead of SF, and SA was both arm and mode switch:** a
+  one-time schema migration (schema 1 -> 2) re-applies the known-device arm/modes
+  seed (F16: SF/button-1 -> ARM) only for the old-default fingerprint, decouples
+  the legacy arm/mode indices and syncs the arm button; a generic guard also
+  blocks a legacy mode-cycle axis from sharing the arm axis. A headless test
+  confirms SF arms/disarms and the mode stays ACRO.
+
 ## [0.1.0] — 2026-09-30 — Cloud-verified (`a453b95`)
 
 ### Added

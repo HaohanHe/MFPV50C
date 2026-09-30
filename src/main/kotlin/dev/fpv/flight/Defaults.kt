@@ -144,7 +144,7 @@ object Defaults {
 
     // ---- Config safety net ----
     /** Schema version stamped into fpvcraft.json (bump when migration changes meaning). */
-    const val CONFIG_SCHEMA_VERSION = 1
+    const val CONFIG_SCHEMA_VERSION = 2
     /** Number of rotated config backups to keep. */
     const val CONFIG_BACKUP_KEEP = 10
 }

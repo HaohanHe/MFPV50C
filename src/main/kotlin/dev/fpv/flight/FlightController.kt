@@ -365,7 +365,10 @@ class FlightController(val cfg: FpvConfig = FpvConfig()) {
         // The data-driven modes router owns mode selection; don't reset it.
         if (modeExternallySelected) return
         val idx = cfg.modeSwitchAxis
-        if (idx < 0) {
+        // Generic guard: a legacy mode-cycle axis must never be the same source as
+        // the arm axis (one switch must not both arm and change mode). The
+        // data-driven modes router is the supported way to bind mode separately.
+        if (idx < 0 || idx == cfg.armSwitchAxis) {
             currentMode = cfg.flightMode
             return
         }

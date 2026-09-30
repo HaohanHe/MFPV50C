@@ -49,8 +49,15 @@ object AttitudeMath {
     fun attitudeErrorBodyRad(qCur: Quaternionf, qTgt: Quaternionf): FloatArray {
         val qErr = Quaternionf(qCur).conjugate().mul(qTgt).normalize()
         unwrapShort(qErr)
-        val (ex, ey, ez) = axisAngleVectorRad(qErr)
-        return floatArrayOf(ex, ey, -ez)
+        // Project the short-angle axis vector through the SAME BodyAxis table used
+        // by bodyRatesDps, so error signs can never drift from measured-rate signs.
+        // (Previously this hand-typed "(ex, ey, -ez)" and got the pitch sign
+        // backwards, which made ANGLE pitch positively feed back and flip over.)
+        val v = axisAngleVectorRad(qErr)
+        val pitchErr = BodyAxis.PITCH.dot(v)
+        val yawErr = BodyAxis.YAW.dot(v)
+        val rollErr = BodyAxis.ROLL.dot(v)
+        return floatArrayOf(pitchErr, yawErr, rollErr)
     }
 
     /** Fold the double cover: if w < 0, negate the quaternion to take the short path. */
