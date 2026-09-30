@@ -1,0 +1,394 @@
+{
+  "meta": {
+    "class": "F9U",
+    "class_full_name_zh": "遥控多旋翼无人机竞速（RC Multi-Rotor Drone Racing）",
+    "class_full_name_en": "FAI Sporting Code Section 4 - Volume F9 Drone Sport, Class F9U (Provisional)",
+    "purpose": "Machine-readable F9U rule spec for code (Minecraft Fabric FPV racing module). All numeric facts come from the 6 cited source PDFs; where a value is not found it is null with a note in evidence_gaps.",
+    "retrieved_date": "2026-09-30",
+    "rule_variants": {
+      "FAI_2023": "FAI Volume F9 Drone Sport 2023 Edition (eff. 2023-02-01) - base class rules + Annex C.1-C.4",
+      "FAI_2025_proposal": "CIAM 2025 Plenary F9 proposals (amendments under vote; not yet the published volume)",
+      "TWG_2025": "2025 World Games Drone Racing Sporting Rules v1 (May 2024)",
+      "CN_2026_nationals": "2026 全国航空航天模型锦标赛竞赛规则 (F9U = section 5.25)",
+      "CN_2026_league_regs": "2026 中国无人机竞速联赛竞赛规程 (season calendar/points only; delegates detail to a separate league rulebook)",
+      "CN_2025_open": "2025 全国航空模型公开赛(河北塞北站)竞赛规则 (F9U = section 3.5)"
+    }
+  },
+
+  "A_competition_structure": {
+    "lap_count": {
+      "value": 3,
+      "unit": "laps_per_race",
+      "note": "Standard heat = 3 consecutive laps. FAI_2023 left lap count to organiser; FAI_2025_proposal + TWG_2025 + CN_2026_nationals fix it at 3 laps for qualification/elimination/final.",
+      "sources": {
+        "FAI_2023": "C.6.3/C.6.4 organiser-defined (not fixed)",
+        "FAI_2025_proposal": "proposals k) C.6.3, C.6.4, n) C.6.5, o) C.6.6: '3 consecutive laps to complete'",
+        "TWG_2025": "6.3 / 6.4 / 6.5: '3 consecutive laps to complete'",
+        "CN_2026_nationals": "5.25.6(1)/(3), 5.25.7(4): 每轮飞3圈 / 完成3圈",
+        "CN_2025_open": "3.5.4: '完成规定圈数和任务' (lap count set by course; not fixed at 3)"
+      }
+    },
+    "flight_time_limit_per_heat_seconds": {
+      "value": 180,
+      "note": "FAI_2025_proposal / TWG_2025 = 3 minutes (180 s) allowed once 3 laps done or limit reached, must land. CN_2026_nationals qualification allows up to 4 minutes (240 s). CN_2025_open does not state a fixed per-heat time.",
+      "by_variant": {
+        "FAI_2025_proposal": 180,
+        "TWG_2025": 180,
+        "CN_2026_nationals_qualification_max": 240,
+        "CN_2025_open": null
+      },
+      "land_when": "completed required laps OR time limit reached -> must land",
+      "sources": {
+        "FAI_2025_proposal": "k) C.6.3 / C.6.4 / n) C.6.5 / o) C.6.6: '3 minutes flight time allowed'",
+        "TWG_2025": "6.3/6.4: '3 minutes flight time allowed'",
+        "CN_2026_nationals": "5.25.6(2): 排位赛飞行时间最长不得超过4分钟"
+      }
+    },
+    "landing_after_completion": "After 3 laps done or time over, model must land immediately; CN_2026_nationals & CN_2025_open require return to designated landing area.",
+    "loop_type": {
+      "closed_loop": {
+        "default": true,
+        "note": "FAI_2023 allowed closed loop (multi-lap) OR open loop (single pass). FAI_2025_proposal d) removes open loop: circuit SHALL be a closed loop with 3 laps. TWG_2025 = closed circuit.",
+        "sources": {
+          "FAI_2023": "C.2: closed loop or open loop both allowed",
+          "FAI_2025_proposal": "d) C.2 reason: 'Removal of the open loop option (Only closed loop with 3 laps)'"
+        }
+      },
+      "open_loop": "permitted only in FAI_2023 base text; removed by 2025 proposal."
+    },
+    "sectors": {
+      "used_for": "facilitate timekeeping / split the loop",
+      "default": "track MAY be divided into sectors (optional).",
+      "sources": {
+        "FAI_2023": "C.2: 'the track can be divided into sectors to facilitate timekeeping'",
+        "FAI_2025_proposal": "d) C.2: 'Optionally, the track may be divided into sectors'"
+      }
+    },
+    "start_to_finish_min_distance_m": {
+      "value": 250,
+      "unit": "meters",
+      "measured_along": "centreline of the optimum 3D flight path, start line to finish line, INCLUDING all laps",
+      "note": "Confirmed 250 m minimum. Domestic docs differ: CN_2026_nationals single lap <450 m; CN_2025_open single lap 80-100 m (short grassroots course).",
+      "by_variant": {
+        "FAI_2023": 250,
+        "FAI_2025_proposal": 250,
+        "TWG_2025": 250,
+        "CN_2026_nationals_single_lap_max": 450,
+        "CN_2025_open_single_lap_min": 80,
+        "CN_2025_open_single_lap_max": 100
+      },
+      "sources": {
+        "FAI_2023": "C.2: 'minimum length ... start line to end line, including all laps, is 250 m ... measured along the centerline of the optimum 3D flight path'",
+        "FAI_2025_proposal": "d)/e) C.2: same 250 m",
+        "CN_2026_nationals": "5.25.3(2): 单圈长度＜450米",
+        "CN_2025_open": "3.5.5: 单圈长度为80-100米"
+      }
+    },
+    "min_air_gate_count": {
+      "value": null,
+      "note": "FAI documents do NOT state a minimum air-gate count. The hypothesis '>=4' is NOT confirmed. Only CN_2025_open specifies a count: at least 3 to 5 arch gates.",
+      "by_variant": {
+        "FAI_2023": "not specified",
+        "FAI_2025_proposal": "not specified",
+        "TWG_2025": "not specified",
+        "CN_2026_nationals": "not specified in F9U section",
+        "CN_2025_open": "3 to 5 arch gates (3.5.5.1)"
+      }
+    },
+    "stages": ["qualification", "elimination", "final"],
+    "pilots_per_heat": {
+      "recommended_max": 4,
+      "qualification_max": 6,
+      "note": "FAI: max 4 per heat recommended (esp. elimination/final); qualifying may be 6. TWG_2025: exactly 4 per group. CN_2026_nationals: 4 per group, max 6 (>=3 for valid result).",
+      "sources": {
+        "FAI_2023": "C.6 intro / C.6.3: max 4, qualifying up to 6",
+        "TWG_2025": "6: 4 per group",
+        "CN_2026_nationals": "5.25.6(1): 每小组4人，最多6人（3人及以上成绩有效）"
+      }
+    }
+  },
+
+  "B_gates_obstacles": {
+    "note": "FAI Annex C.1 defines only MINIMUM clear apertures (not a fixed gate catalog). The only concrete named gate opening size across all 6 sources is the domestic arch gate. Square/flag/circle/tunnel catalogs with exact m dimensions were NOT found in these 6 documents.",
+    "gate_to_cross_min_internal_clear_diameter_m": {
+      "value": 1.5,
+      "unit": "meters (minimum diameter of free space centred on optimum flight path)",
+      "note": "Applies to air gates / gate combinations / tunnels. Internal space must be free of rigging (wire/rope).",
+      "source": "FAI_2023 Annex C.1 section 4.1: 'obstacle inside shall be free space within a minimum diameter of 1.5 m centered in the optimal flight path'"
+    },
+    "obstacle_to_avoid_min_free_space_diameter_m": {
+      "value": 2.5,
+      "unit": "meters (minimum free space diameter centred on optimum 3D flight path)",
+      "note": "Applies to walls/flags/pylons/flyers to be avoided; slalom structures.",
+      "source": "FAI_2023 Annex C.1 section 4.2: 'free space shall be of a minimum 2.5 m diameter centered in the optimal 3D flight path'"
+    },
+    "gate_visibility_distance_m": {
+      "value": 30,
+      "unit": "meters: obstacles must contrast with background and be perfectly visible with a standard FPV video device at 30 m",
+      "source": "FAI_2023 Annex C.1 section 4"
+    },
+    "gate_catalog": [
+      {
+        "type_zh": "拱门 / 障碍门 (arch / air gate to cross)",
+        "type_en": "arch gate",
+        "opening_width_m": {"min": 1.6, "max": 2.0},
+        "opening_height_m": {"min": 1.3, "max": 1.5},
+        "count_min": 3,
+        "count_max": 5,
+        "extra": "Consecutively placed arch gates count as ONE gate. Arch gate must be >=20 m from pilot station; >=5 m straight approach before gate; gate placement angle <=10 deg.",
+        "source": "CN_2025_open 3.5.5.1: 拱门宽度1.6-2.0米，高度1.3-1.5米；至少3至5个；距操纵区不少于20米；进入前至少5米直线；放置角度不大于10度"
+      },
+      {
+        "type_zh": "任务单元 / 其它障碍 (task unit / other obstacle)",
+        "type_en": "task obstacle",
+        "min_size_m": {"w": 0.5, "h": 0.5},
+        "max_height_m_above_ground": 3.0,
+        "extra": "May be on ground or up to 3 m above ground.",
+        "source": "CN_2025_open 3.5.5.2: 每个任务单元最小尺寸0.5米×0.5米，可放地面或不高于地面3米位置"
+      },
+      {
+        "type_zh": "方块门/旗门/圆环/隧道 (square gate / flag gate / ring / tunnel)",
+        "type_en": "standard named gate catalog",
+        "opening_width_m": null,
+        "opening_height_m": null,
+        "note": "NOT FOUND with exact dimensions in any of the 6 sources. FAI only gives the 1.5 m minimum clear aperture for anything-to-cross; the domestic docs only give the arch gate. Treat gate shapes as open to organiser; code should parameterize opening box (min 1.5 m clear) rather than assume a fixed catalog.",
+        "source": "evidence_gaps"
+      }
+    ],
+    "gate_numbering_color_standards": {
+      "numbering": "not specified in the 6 sources",
+      "color_spec": "Models carry LED colors (Blue-Green-Red-Yellow-Cyan-Magenta) for pilot identification, NOT gate colors. Gate color = must contrast with background / clearly visible.",
+      "sources": {
+        "CN_2026_nationals": "5.25.1(9): LED colors 蓝-绿-红-黄-青-品红",
+        "TWG_2025": "2.6: LED colors Blue-Green-Red-Yellow-Cyan-Magenta",
+        "FAI_2023 Annex C.1.4": "obstacles must contrast with background"
+      }
+    },
+    "obstacle_disappearance_wait_seconds": {
+      "value": null,
+      "note": "The hypothesized '10 s wait after an obstacle disappears' is NOT a racing-gate rule. FAI C.7.1: when an obstacle is damaged/destroyed, pilots are informed; officials decide continue / allow bypass / stop race. The 10 s figure found in domestic docs applies only to FREE-FLIGHT timed events (model hidden behind obstacle -> wait 10 s) and to the 3rd-view microsdr course overturn recovery (>10 s = stop), NOT to F9U gate racing.",
+      "sources": {
+        "FAI_2023": "C.7.1: no fixed wait; decision to continue/bypass/stop",
+        "CN_2026_nationals": "2.2.2.10 (free-flight): 模型遮挡等待10秒",
+        "CN_2025_open": "3.7.7.2 (第三视角): 翻转超过10秒未复飞则终止"
+      }
+    },
+    "track_min_width_height_clearance": {
+      "value": null,
+      "note": "No explicit minimum track width/height envelope. Only the per-obstacle clear apertures (1.5 m gate / 2.5 m avoid free space) and FPV 30 m visibility.",
+      "indoor_reference_only": "F9A drone soccer indoor ceiling >=5 m (not F9U)"
+    },
+    "start_line_placement": {
+      "FAI_2023": "side-by-side single line perpendicular to start trajectory, spacing 0.5-1.0 m; OR inverted-V (0.5 m side / 0.5 m f-b min, 1.0 m side / 1.5 m back max)",
+      "FAI_2025_proposal": "side-by-side single line only; recommended 60-120 deg turn before first gate, flagged >=10 m from start line and gate",
+      "sources": {
+        "FAI_2023": "Annex C.1 section 3 Start",
+        "FAI_2025_proposal": "d) C.2"
+      }
+    },
+    "finish_line": {
+      "definition": "2D area to be crossed; pilot finishes when model touches and completely crosses it",
+      "pickup_area_after_finish": true,
+      "source": "FAI_2023 Annex C.1 section 5 Finish line"
+    }
+  },
+
+  "C_timing_triggers": {
+    "electronic_timing_required": true,
+    "redundancy_required": true,
+    "manual_timing_allowed": {
+      "FAI_2023": "allowed if announced 1 month ahead (not recommended)",
+      "FAI_2025_proposal": "NOT authorised (manual timekeeping deleted)",
+      "TWG_2025": "electronic with redundancy",
+      "CN_2026_nationals": "electronic timing, precision 0.01 s"
+    },
+    "resolution_seconds": {
+      "value": 0.01,
+      "note": "CN_2026_nationals: 计时精确到0.01秒. FAI/TWG do not state a numeric resolution beyond 'accurate/electronic'.",
+      "source": "CN_2026_nationals 5.25.5(3): 电子计时系统，计时精确到0.01秒"
+    },
+    "qualification_trigger": "per-model clock starts when the model passes the gate fitted with timing sensor(s); after take-off from start area the model must fly DIRECTLY to that timing gate.",
+    "elimination_final_trigger": "clock starts at the start signal (when sounded).",
+    "sources": {
+      "FAI_2023": "C.6.1: qualifying triggered at timing gate; else at start",
+      "FAI_2025_proposal": "h) C.6.1",
+      "TWG_2025": "6.1",
+      "CN_2026_nationals": "5.25.5(4): 排位赛以通过计时门触发；淘汰/决赛以起飞信号触发"
+    },
+    "unfinished_laps_count": "Laps not completed are NOT recorded and do not contribute to result/placing/tie-break (FAI_2025_proposal h); unfinished single laps not recorded (CN_2026 5.25.5(5))."
+  },
+
+  "D_ranking_algorithm": {
+    "qualification_method": {
+      "FAI_2023_method_a": "fastest time to complete organiser-defined required laps (not recommended when <=3 rounds)",
+      "FAI_2023_method_b": "average of the 3 best single VALID lap times across ALL qualifying rounds (laps may come from same or different rounds); default 3 but organiser may use 2 or 4",
+      "TWG_2025": "4 qualifying rounds; rank by average of the 3 fastest valid single-lap times across all rounds; pilots with only 2 times ranked after those with 3, those with 1 after those with 2",
+      "CN_2026_nationals": ">=3 rounds; take the BEST completed (3-lap) result across rounds as valid result; tie -> fastest single lap, then next better round, etc. 2-lap finishers ranked after 3-lap, 1-lap after 2-lap",
+      "CN_2025_open": "2 rounds, take best round; tie -> other round",
+      "note": "User hypothesis 'average of 3 fastest single laps' = TRUE for FAI method b and TWG_2025, but CN_2026_nationals instead uses best whole-round (3-lap) time. Code should make the aggregation function configurable."
+    },
+    "tie_break_qualification": "FAI b: 4th-best single lap, then 5th, etc.; else tie-break flight. CN_2026: fastest single lap then another better round.",
+    "elimination": {
+      "format": "top 2 of each heat advance directly; 3rd/4th go to double-elimination bracket if applied",
+      "heat_size": 4,
+      "double_elimination": {
+        "optional_in_FAI_2023": true,
+        "applied_TWG_2025": true,
+        "applied_CN_2026": "single elimination until top-16, THEN double elimination until top-4",
+        "elimination_rule": "3rd & 4th place in a double-elimination heat are definitively eliminated; upper-bracket 3rd/4th drop to lower bracket"
+      },
+      "competitor_scenarios": {"A": 64, "B": 32, "C": 16},
+      "cn_2026_elimination_count": 64
+    },
+    "final": {
+      "FAI_2023": "default single final; optional successive final races until one finalist wins 2; points 1/2/3/4 per race for places 2-4",
+      "TWG_2025": "top 2 from last elimination race + top 2 from last double-elim race -> final; successive final races until one wins 2; points 1/2/3/4",
+      "CN_2026_nationals": "top 4 from double elimination -> final; point system 4/3/2/1 per final round (DNF=0); max 5 final rounds; ends when 1st place points reach an absolute (unbeatable) total",
+      "cn_2026_final_points": {"1st": 4, "2nd": 3, "3rd": 2, "4th": 1, "dnf": 0}
+    },
+    "league_season_points_CN_2026": {
+      "1st": 20, "2nd": 17, "3rd": 15, "4th": 13,
+      "5-8": 12, "9-16": 10, "17-32": 8, "33-48": 6, "49-64": 4,
+      "beyond_64": "by qualification result; >=1 valid finished round = 1",
+      "team": "sum of best 4 athletes per team"
+    }
+  },
+
+  "E_takeoff_landing": {
+    "takeoff_area": "models placed on start line/pods; pilots have 2 min max to be ready; 'Pilots, arm your quads' then 2-4 s (random in 2025 proposal; ~3 s in 2023/TWG) start tone, no countdown",
+    "not_ready_penalty": "model not on start pod after 2-min prep, OR fails to take off within 5 s of start signal -> that race/round DQ (CN_2026 5.25.8(4) / 5.25.14 A; CN_2025_open 3.5.6.1)",
+    "must_return_to_landing_zone": {
+      "required": true,
+      "note": "CN_2025_open: '未返回降落区，成绩无效'. CN_2026_nationals 5.25.8(3): '立即返回降落区'; 5.25.14 C: not landing in designated area / celebratory flying after finish = race DQ. FAI/TWG: there is a pick-up area after finish but no hard 'must return or score invalid' wording.",
+      "sources": {
+        "CN_2025_open": "3.5.4: 完成规定圈数和任务并返回降落区。未返回降落区，成绩无效",
+        "CN_2026_nationals": "5.25.8(3), 5.25.14 C"
+      }
+    },
+    "touch_ground_or_crash_ends_heat": {
+      "cn_2025_open": "landing <=5 s OR recoverable crash: may continue BUT +30 s; landing >5 s OR unflyable crash: heat stopped, score 0",
+      "fai": "if model cannot continue after crash, it stays on ground motors-off until race end; pilot removes goggles; helper+ pilot stay quiet. No automatic +30 s in FAI.",
+      "source": "CN_2025_open 3.5.4; FAI_2023 C.7.4; CN_2026_nationals 5.25.8(5)"
+    },
+    "crash_procedure": "pilot removes goggles to signal retirement; model stays on ground with power cut/locked; pilot+helper silent until race ends; (2025 proposal) activate pit mode to cut VTX power."
+  },
+
+  "F_penalties": {
+    "abandon_task_or_incomplete_penalty_seconds": {
+      "value": 30,
+      "applies": "CN_2025_open only: abandoning OR not completing a task unit -> total time +30 s. Also a <=5 s landing / recoverable crash -> +30 s continue.",
+      "source": "CN_2025_open 3.5.4: 某项任务放弃或未完成则总时间加30秒；着陆不超过5秒或摔机可继续者加时30秒",
+      "fai_equivalent": "FAI has NO +30 s penalty; missing a gate = that lap not validated, may re-fly the gate; correction collision = race DQ."
+    },
+    "missed_gate_wrong_order": {
+      "FAI": "missed obstacle / missed pylon-flag / shortcut -> that lap NOT validated; pilot may immediately and safely correct; if corrected the lap counts; collision during correction = race DQ",
+      "CN_2026_nationals": "wrong line or missed mark may self-correct else round invalid; collision while correcting = round DQ; only the collided-upon pilot in qualifying may reflight",
+      "CN_2025_open": "must return and re-do missed task, else round invalid",
+      "sources": {"FAI_2023": "C.7.2", "CN_2026_nationals": "5.25.8(6)", "CN_2025_open": "3.5.4"}
+    },
+    "false_start": {
+      "FAI_TWG": "model leaves start position before signal and progresses through first gate -> race DQ (race not stopped)",
+      "CN_2026_nationals": "false start: race continues, offender penalized; start before signal listed as round DQ (5.25.14 B)",
+      "CN_2025_open": "1st false start = warning; 2nd = round DQ",
+      "sources": {"FAI_2023": "C.6.2/C.7.3", "TWG_2025": "8.1", "CN_2025_open": "3.5.6.2"}
+    },
+    "race_DQ_conditions": [
+      "early start / false start through first gate",
+      "collision while correcting a missed gate",
+      "circuit exit / crossing safety line",
+      "flying after (even temporarily) removing goggles (TWG)",
+      "celebratory / aerobatic maneuver, esp. after finishing",
+      "hazardous piloting / compromised safety",
+      "not landing in designated area / celebratory flying after finish (CN)",
+      "model not on pod at 2-min prep end or not airborne 5 s after start signal (CN)"
+    ],
+    "event_DQ_conditions": [
+      "non-conforming / unchecked equipment",
+      "VTX over max power or unauthorized activation",
+      "same model used by different competitors",
+      "unauthorized practice flights on circuit",
+      "not stopping after a false-start DQ",
+      "deliberately dangerous / unsporting behavior"
+    ],
+    "reflight_policy": {
+      "individual_reflight": "qualification stage ONLY (FAI/TWG/CN_2026); original flight cancelled",
+      "heat_restart": "before-first-gate mid-air collision (one restart per race), critical safety incident, external incident, deliberate unfair advantage (2025 proposal C.8.2)",
+      "no_reflight_for": "video issue, collision, in elimination/final/additional rounds"
+    }
+  },
+
+  "G_anti_turtle": {
+    "permitted": true,
+    "wording": {
+      "FAI_2023": "Note in C.1: 'Software recovery modes such as anti Turtle or anti crash and automatic system which can be activated by the pilot in order to level back the model after a crash are permitted.'",
+      "FAI_2025_proposal": "'Flip over after crash' (also known as Turtle mode) / Crash recovery permitted",
+      "TWG_2025": "'Flip over after crash' (Turtle mode) / Crash recovery permitted",
+      "CN_2025_open": "3.5.4: 飞行期间若坠落，允许使用'反乌龟'模式，在不接触模型的情况下，反转模型（without touching the model）",
+      "CN_2025_open_F9A": "3.6.3: 允许使用'反乌龟'模式，在不接触模型的情况下翻转模型"
+    },
+    "constraint": "must be pilot-activated software after crash to right the model; forbidden: pre-programmed maneuvers, automatic positioning/path correction (GPS/position hold). Manual touching the model to flip it is NOT the permitted case in CN_2025_open (it must be done WITHOUT touching the model)."
+  },
+
+  "H_hardware": {
+    "note": "MC (multi-rotor) model class. Recorded separately per user request.",
+    "all_up_weight_max_g": {
+      "value": 1000,
+      "unit": "grams (incl. battery & all on-board equipment)",
+      "sources": {"FAI_2023": "C.1.1", "TWG_2025": "2.1", "CN_2026_nationals": "F9U follows FAI; 2.3 lists F9U=3 frames"}
+    },
+    "motor_axis_circle_diameter_mm": {
+      "value": 330,
+      "note": "axes of all motors must fit within a 330 mm diameter circle (= wheelbase/轴距 <=330 mm).",
+      "sources": {"FAI_2023": "C.1.1", "TWG_2025": "2.1", "CN_2025_open": "3.5.2.1: 轴距不大于330毫米"}
+    },
+    "cell_full_charge_voltage_max_v": {
+      "value": 4.25,
+      "note": "max voltage per cell when fully charged. Implies 4S=17 V, 6S=25.5 V. Measured before flight (FAI) / before EACH race (TWG).",
+      "by_pack": {"3S": 12.75, "4S": 17.0, "6S": 25.5},
+      "sources": {"FAI_2023": "C.1.2: 4.25 V/cell; up to 6S", "TWG_2025": "2.2: 4.25 V when fully charged, measured before each race", "CN_2025_open": "3.5.2.1: 3S max 12.75 V only (regional restriction)"}
+    },
+    "max_s_count": {
+      "FAI_TWG": 6,
+      "CN_2025_open": 3,
+      "note": "FAI/TWG allow up to 6S; the grassroots CN_2025_open restricts to 3S."
+    },
+    "motor_tilt_max_deg": 15,
+    "propeller_max_inches": {"value": 6, "cm": 15.2, "metal_propellers": "forbidden"},
+    "motor_min_count": 3,
+    "rc": "2.4 GHz spread spectrum; 868/915 MHz (900 MHz) modules max 100 mW; 433 MHz not authorized in China",
+    "video": {
+      "band": "5.8 GHz only (2025 proposal/TWG); Raceband R 5658-5917 MHz",
+      "vtx_power_max_mw": 25,
+      "digital_bitrate_max_mbps": 25,
+      "max_bandwidth_mhz": 30,
+      "pit_mode_required": "2025 proposal: VTX pit mode (cuts video power) mandatory",
+      "personal_rx": "must be mounted directly on goggles, extend <=160 mm above goggle connector; no external mast/stand antennas"
+    },
+    "led": {
+      "min_bulbs": 32,
+      "min_strip_length_mm": 280,
+      "colors": ["Blue", "Green", "Red", "Yellow", "Cyan", "Magenta"],
+      "uniformly_distributed": true
+    },
+    "identification_mark": "3-letter national mark + FAI licence/ID number, >=6 mm high (FAI) / readable at arm's length (TWG); domestic: national letters + membership number >=25 mm",
+    "max_frames_per_competitor": {
+      "FAI_TWG": 3,
+      "CN_2026_nationals": 3,
+      "CN_2025_open": 2,
+      "note": "one model may be used by only one competitor per event"
+    },
+    "autonomy": "no pre-programmed maneuvers, no automatic positioning/path correction; STABILISE/self-level (自稳) allowed; FPV manual throughout; helper mandatory (VLOS spotter)."
+  },
+
+  "evidence_gaps": [
+    "Exact dimensions (opening width x height in m) for a STANDARD catalog of named gates (square gate 方块门 / flag gate 旗门 / ring 圆环 / tunnel 隧道) are NOT given in any of the 6 sources. FAI Annex C.1 only specifies a minimum 1.5 m clear diameter for to-cross gates and 2.5 m free space for to-avoid obstacles. Only the domestic arch gate (宽1.6-2.0 m x 高1.3-1.5 m) has a concrete opening size.",
+    "Minimum air-gate count >=4 NOT confirmed. FAI/TWG set no minimum; CN_2025_open says 3-5 arch gates.",
+    "'Obstacle disappears -> wait 10 s' is NOT an F9U racing rule in these sources; the 10 s figure belongs to free-flight timed events and the 3rd-view microdrone course.",
+    "Per-race flight time limit: FAI/TWG = 180 s (3 min); CN_2026_nationals qualification = up to 240 s (4 min); CN_2025_open has no fixed limit. No single universal value.",
+    "Gate numbering / color-coding spec for the gates themselves is not defined (only model LED colors are).",
+    "Minimum track width / height clearance envelope not defined (only per-obstacle apertures and 30 m FPV visibility).",
+    "2026 中国无人机竞速联赛 references a separate 《2026年中国无人机竞速联赛竞赛规则》 detailed rulebook; the provided 规程 PDF contains only season structure, team roster and points, not gate/lap detail. That detailed league rulebook was not among the supplied URLs.",
+    "FAI 2025 plenary items are PROPOSALS (several passed by S/C vote) but are amendments to be incorporated; the currently PUBLISHED Volume F9 is the 2023 edition. Where 2023 text and 2025 proposal conflict, both are recorded.",
+    "FAI_2023 does not state a numeric timing resolution; only CN_2026_nationals specifies 0.01 s."
+  ]
+}

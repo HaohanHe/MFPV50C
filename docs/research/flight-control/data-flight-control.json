@@ -1,0 +1,126 @@
+{
+  "meta": {
+    "topic": "flight-control-research-for-mc-elytra-mod",
+    "fetched_at": "2026-09-30",
+    "scope": "online research only; no mod code, no gradle, no git; MIT clean-room, only public formulas/parameter names/architecture recorded, no GPL source text copied",
+    "evidence_grades": ["official", "textbook", "community", "inferred"],
+    "target_mod_context": {
+      "branch": "main=f754ac2",
+      "problem": "current thrust applied along body-forward instead of body-up; roll has no physical effect",
+      "fix_pitch": "thrust along bodyUp=attitude*(0,1,0); hoverThrottle=mg/T_max; tilt -> g*tan(tilt) horizontal accel, T*cos(tilt) vertical component"
+    }
+  },
+  "lineage": [
+    {"name": "MultiWii", "year": 2010, "author": "Alexinparis", "note": "8-bit Atmel origin"},
+    {"name": "Baseflight", "year": 2013, "author": "timecop", "note": "Naze32 / STM32 32-bit port"},
+    {"name": "Cleanflight", "year": 2014, "author": "Dominic Clifton", "parent": "Baseflight"},
+    {"name": "Betaflight", "year": 2015, "author": "borisbstyle", "parent": "Cleanflight", "note": "racing/freestyle de-facto standard"},
+    {"name": "INAV", "year": 2015, "author": "DigitalEntity", "parent": "Cleanflight", "note": "GPS / navigation / fixed-wing"},
+    {"name": "Butterflight", "year": 2018, "parent": "Betaflight", "note": "forked after BF 3.3 removed Kalman filter"},
+    {"name": "EmuFlight", "year": 2019, "author": "Marinus", "parent": "Butterflight", "note": "based on open-sourced HelioRC IMUF; name voted by community; blue bird logo; feature ABG(alpha-beta-gamma) predictive filter"}
+  ],
+  "renaming": {
+    "user_heard_as_cherry_or_garbled": "EmuFlight",
+    "verdict": "EmuFlight is a real open-source flight controller, descendant of Cleanflight->Betaflight->Butterflight; not a separate lineage",
+    "cleanflight_status": "common upstream of Betaflight / INAV / EmuFlight, not the garbled one"
+  },
+  "physics": {
+    "thrust_direction": "along body +Z (body-up, propellers facing up), NOT along body forward",
+    "gravity": "world -Z",
+    "equations": [
+      {"id": "vert_balance", "formula": "F_body * cos(theta) = m*g", "meaning": "to hold altitude while pitched theta, total thrust must grow"},
+      {"id": "horiz_accel", "formula": "a_horizontal = g * tan(theta)", "meaning": "horizontal acceleration from tilt; same for roll giving lateral accel"},
+      {"id": "vert_component", "formula": "F_vertical = F_thrust * cos(theta)", "meaning": "vertical thrust component shrinks when tilted -> altitude drops if thrust magnitude unchanged"},
+      {"id": "hover_throttle_cond", "formula": "T_total(t_hover) = m*g", "meaning": "hover throttle is the command where total thrust equals weight"},
+      {"id": "drag", "form": "F_drag = k * v^2 (opposing velocity)", "note": "coefficient k to be tuned per airframe; textbook simplification m*vz_dot = F*cos(theta) - b*vz - m*g"}
+    ],
+    "tilt_effects": {
+      "pitch_down": "accelerate forward; slight altitude loss because vertical component shrinks",
+      "roll": "lateral acceleration; altitude loss; NOT purely visual"
+    }
+  },
+  "hover_throttle_parameters": [
+    {"firmware": "Betaflight", "param": "hover_throttle / ap_hover_throttle", "alt": "throttle_mid + throttle_expo (legacy)", "behavior": "AltHold starts at hover_throttle, PID trims around it; too low drops, too high climbs", "source_id": "bf_poshold"},
+    {"firmware": "ArduPilot Copter", "param": "MOT_THST_HOVER", "default": 0.25, "learn": "MOT_HOVER_LEARN / ATC_HOVER_LEARN", "source_id": "ap_althold"},
+    {"firmware": "ArduPilot Plane VTOL", "param": "Q_M_THST_HOVER", "learn": "Q_M_HOVER_LEARN", "source_id": "ap_qacro"},
+    {"firmware": "PX4", "param": "MPC_THR_HOVER", "default": 0.5, "curve_param": "MPC_THR_CURVE=Rescale to hover thrust by default", "note": "racers / camera drones may drop to ~0.35", "source_id": "px4_manual_stab"},
+    {"firmware": "INAV multicopter", "param": "nav_mc_hover_thr", "note": "read OSD hover throttle value; if >1700 PWM motors underpowered", "source_id": "inav_mc_guide"}
+  ],
+  "coordinated_turn": {
+    "fixed_wing": {
+      "mechanism": "ailerons bank the wing; lift vector tilted gives centripetal force; rudder removes adverse yaw / sideslip so balance ball centers",
+      "equations": {
+        "tan_phi": "V * omega / g",
+        "omega": "g * tan(phi) / V",
+        "load_factor": "n = 1 / cos(phi)",
+        "example_60deg": "n = 2"
+      },
+      "standard_turn_rate": "3 deg/s (2 min per 360)",
+      "inav": "TURN ASSIST auto-applies elevator+rudder in RTH/LOITER/CRUISE/WP"
+    },
+    "multirotor": {
+      "has_rudder": false,
+      "px4_statement": "Pitch=forward/back, Roll=left/right, Yaw=heading rotation, Throttle=altitude",
+      "how_it_turns": "roll tilt produces lateral force (g*tan(phi)); yaw changes heading independently",
+      "note": "no fixed-wing style aileron-rudder coupling"
+    },
+    "mod_p_b_2_note": "mod's 'coordinated turn' on vanilla remote server is a LOOK-MAPPING (roll amount -> equivalent yaw delta, optional pitch compensation), NOT real aerodynamic coordinated turn; GUI must label it as compatibility-layer approximation"
+  },
+  "betaflight": {
+    "quadx_motor_map_props_out": {
+      "M1": "rear-right, CW",
+      "M2": "front-right, CCW",
+      "M3": "rear-left, CCW",
+      "M4": "front-left, CW",
+      "warning": "Props-In / Butterflight style mirrors this; trust Configurator Motors tab diagram"
+    },
+    "default_rates_4_3_plus": {
+      "mode": "Actual Rates",
+      "center_sensitivity_dps": 70,
+      "max_rate_dps": 670,
+      "expo": 0.0,
+      "applies_to": ["roll", "pitch", "yaw"],
+      "note": "user-stated center70/max670/expo0 confirmed; roll and pitch defaults must stay equal"
+    },
+    "legacy_rates_default": {"rc_rate": 1.0, "super_rate": 0.7, "expo": 0.0, "max_rate_formula": "(RC_RATE*200)/(1-SUPER_RATE)"},
+    "airmode": {"param": "airmode_start_throttle_percent", "default": 25, "meaning": "姿态控制在低油门仍输出, prevent flipping when throttle cut"},
+    "throttle_boost": {"dump_default_value": 5, "unit_uncertain": "ms (not source-read from code)", "cutoff": 15},
+    "3d": {"reversible": true, "zero_thrust_at_mid_stick": true, "param": "3d_deadband_throttle", "default": 50, "mod_needed": false},
+    "osd_elements": ["avg_cell_voltage", "pitch_angle", "roll_angle", "warning_icons"],
+    "battery_defaults_mV_x10": {
+      "vbat_max_cell_voltage": 430,
+      "vbat_full_cell_voltage": 410,
+      "vbat_min_cell_voltage": 330,
+      "vbat_warning_cell_voltage": 350
+    }
+  },
+  "emuflight": {
+    "origin": "fork of Butterflight (itself a BF fork), summer 2019, by Marinus, after open-sourcing HelioRC IMUF",
+    "signature_filter": "ABG (alpha-beta-gamma) predictive filter on gyro/d-term; params ABG_Alpha (strength), ABG_Boost (reaction to fast changes)",
+    "mod_relevance": "none for client-side motion sim; kept for naming clarification only"
+  },
+  "px4_and_ardupilot_extra": {
+    "geometric_controller": "T = m * ||a_des + g*z_hat||; body z = (a_des + g*z_hat)/||.||",
+    "px4_stabilized": "roll/pitch sticks control attitude angle, not rate; self-level on release",
+    "px4_thrust_curve": "THR_MDL_FAC ~0.3 for PWM ESCs compensating non-linear throttle->thrust (~quadratic)",
+    "ardupilot_althold": "mid-stick deadzone 40%-60% holds altitude"
+  },
+  "mod_mapping": [
+    {"task": "P-A-1 thrust to bodyUp", "basis": "physics.thrust_direction / tilt_effects", "formula": "F = thrust*bodyUp + (0,0,-mg) + k*v*v*(-v_hat)"},
+    {"task": "P-A-2 hoverThrottle", "basis": "physics.hover_throttle_cond", "default": "m*g / T_max"},
+    {"task": "P-A-3 pitch forward+dip, roll lateral+dip", "basis": "physics.tilt_effects", "auto_from_bodyUp": true},
+    {"task": "P-A-4 roll/pitch equal default rates", "basis": "betaflight.default_rates_4_3_plus", "both_70_670_0": true},
+    {"task": "P-A-4 airmode idle control", "basis": "betaflight.airmode", "effect": "low throttle still does roll/pitch control"},
+    {"task": "P-B-1 remote: write attitude->yaw/pitch back to look", "basis": "DABR reference (user-provided) + multirotor decoupled axes", "no_extra_velocity": true},
+    {"task": "P-B-2 roll->equivalent yaw coordinated turn", "basis": "coordinated_turn.mod_p_b_2_note", "effect": "gain configurable, default on, label as approximation"},
+    {"task": "P-B-3 firework rocket thrust", "basis": "vanilla elytra has no propulsion; direction follows written-back look", "effect": "auto periodic use-item above threshold"},
+    {"task": "P-B-4 anti-kick", "basis": "evidence gap; generic anti-cheat community practice", "effect": "watch ClientboundPlayerPosition/PosLook, rubber-band detection, back off freq/gain, blackbox"}
+  ],
+  "evidence_gaps": [
+    "drag coefficient k value: left to airframe tuning",
+    "Minecraft anti-cheat max-firework-delay exact threshold: no official Mojang/Paper doc found",
+    "EmuFlight name etymology: official FAQ only says community vote",
+    "throttle_boost precise unit/formula: dump shows 5/15 but not source-read",
+    "whether BF/INAV multicopter has explicit rudder output: inferred from PX4 statement that multicopter has no rudder"
+  ]
+}

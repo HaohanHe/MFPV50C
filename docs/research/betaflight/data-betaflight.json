@@ -1,0 +1,342 @@
+{
+  "meta": {
+    "repo": "https://github.com/betaflight/betaflight.git",
+    "commit": "744f95fa31542c4c906f18072348a366ab11b6b7",
+    "shortHash": "744f95f",
+    "commitDate": "2026-09-28",
+    "fetchedDate": "2026-09-29",
+    "cloneMode": "git clone --depth 1",
+    "license": "GPLv3 (study only, clean-room rewrite permitted)",
+    "purpose": "Reference design for Minecraft Fabric 1.21.11 Kotlin pure-client FPV mod"
+  },
+  "subsystems": [
+    {
+      "id": "rx",
+      "purpose": "RX channel normalization, RSSI, failsafe state machine, AUX mode switch parsing",
+      "sourceFiles": [
+        {"path": "src/main/rx/rx.c", "functions": ["rxPulseRead", "isPulseValid", "rcRead", "rxUpdate", "getRxfailValue", "scaleRangePwmRssi", "rssieUpdate"]},
+        {"path": "src/main/pg/rx.c", "functions": ["pgResetFn_rxConfig", "parseRcChannels"]},
+        {"path": "src/main/rx/rx.h", "functions": ["PWM_PULSE_MIN/MAX", "RX_MIN_USEC/MAX_USEC/MID_USEC"]},
+        {"path": "src/main/flight/failsafe.c", "functions": ["failsafeUpdateStateMachine", "getVEscapeAction", "getArmingDisableFlags"]},
+        {"path": "src/main/fc/rc_modes.c", "functions": ["updateMasksForMac", "isRangeActive", "updateActivatedModes", "updateAirmode"]}
+      ],
+      "defaults": [
+        {"name": "PWM_PULSE_MIN", "value": 750, "unit": "us"},
+        {"name": "PWM_PULSE_MAX", "value": 2250, "unit": "us"},
+        {"name": "PWM_RANGE_MIN", "value": 1000, "unit": "us"},
+        {"name": "PWM_RANGE_MAX", "value": 2000, "unit": "us"},
+        {"name": "RX_MID_USEC", "value": 1500, "unit": "us"},
+        {"name": "RX_MIN_USEC", "value": 885, "unit": "us"},
+        {"name": "RX_MAX_USEC", "value": 2115, "unit": "us"},
+        {"name": "MAX_INVALID_PULSE_TIME_MS", "value": 300, "unit": "ms"},
+        {"name": "RXLOSS_TRIGGER_INTERVAL", "value": 150, "unit": "ms"},
+        {"name": "RX_FRAME_RECHECK_INTERVAL", "value": 50, "unit": "ms"},
+        {"name": "failsafe_delay", "value": 1.5, "unit": "s"},
+        {"name": "failsafe_throttle", "value": 1000, "unit": "us"},
+        {"name": "failsafe_throttle_low_delay", "value": 1.0, "unit": "s"},
+        {"name": "failsafe_landing_time", "value": 60, "unit": "s"},
+        {"name": "failsafe_recovery_delay", "value": 0.5, "unit": "s"},
+        {"name": "failsafe_procedure", "value": "DROP_IT", "unit": "enum"},
+        {"name": "rssi_scale", "value": 100, "unit": "percent"},
+        {"name": "rssi_offset", "value": 0, "unit": "rssi unit"},
+        {"name": "rssi_smoothing", "value": 125, "unit": "256-count"},
+        {"name": "RSSI_MAX_VALUE", "value": 1023, "unit": "count"},
+        {"name": "CHANNEL_RANGE_MIN", "value": 900, "unit": "us"},
+        {"name": "CHANNEL_RANGE_MAX", "value": 2100, "unit": "us"},
+        {"name": "mode step", "value": 25, "unit": "us/step"},
+        {"name": "rcmap default", "value": "AETR1234", "unit": "string"},
+        {"name": "NON_AUX_CHANNEL_COUNT", "value": 4, "unit": "channel"},
+        {"name": "DEFAULT_AUX_CHANNEL_COUNT", "value": 12, "unit": "channel"}
+      ],
+      "configParams": ["rssi_src", "rssi_scale", "rssi_offset", "rssi_smoothing", "failsafe_delay", "failsafe_throttle", "failsafe_procedure", "rcmap", "mincheck", "midrc", "rx_min_usec", "rx_max_usec"],
+      "cleanRoomNotes": [
+        "Abstract RcChannels as roll/pitch/yaw in [-500,500], throttle in [1000,2000], aux as list of us",
+        "Failsafe: 300ms hold -> 1.5s stage1 -> stage2 (DROP disarms immediately, LANDING waits 60s)",
+        "AUX activation: step=(value-900)/25, range [startStep,endStep)"
+      ],
+      "evidenceGaps": ["CRSF ELRS LQ/SNR exact scaling not deep-read", "serial RX provider-specific frame timing not covered"]
+    },
+    {
+      "id": "rates_throttle",
+      "purpose": "Stick-to-rate mapping (actual/legacy/quick), throttle curve, 3D deadband, throttle boost",
+      "sourceFiles": [
+        {"path": "src/main/fc/rc.c", "functions": ["applyActualRates", "applyBetaflightRates", "applyQuickRates", "initRcProcessing", "rcLookupThrottle", "calculateThrottleMid8"]},
+        {"path": "src/main/fc/controlrate_profile.c", "functions": ["pgResetFn_controlRateProfiles"]},
+        {"path": "src/main/fc/rc_controls.c", "functions": ["pgResetFn_flight3DConfig"]}
+      ],
+      "defaults": [
+        {"name": "rates_type", "value": "ACTUAL", "unit": "enum"},
+        {"name": "rcRates[RPY]", "value": 70, "unit": "dps (center sensitivity, actual)"},
+        {"name": "rates[RPY]", "value": 670, "unit": "dps (max rate, actual)"},
+        {"name": "rcExpo[RPY]", "value": 0, "unit": "0-1"},
+        {"name": "rate_limit[RPY]", "value": 1998, "unit": "dps"},
+        {"name": "thrMid8", "value": 50, "unit": "percent"},
+        {"name": "thrExpo8", "value": 0, "unit": "0-1"},
+        {"name": "thrHover8", "value": 50, "unit": "percent"},
+        {"name": "deadband", "value": 0, "unit": "us"},
+        {"name": "yaw_deadband", "value": 0, "unit": "us"},
+        {"name": "deadband3d_low", "value": 1406, "unit": "us"},
+        {"name": "deadband3d_high", "value": 1514, "unit": "us"},
+        {"name": "neutral3d", "value": 1460, "unit": "us"},
+        {"name": "deadband3d_throttle", "value": 50, "unit": "us half-width"},
+        {"name": "throttle_boost", "value": 5, "unit": "scale"},
+        {"name": "throttle_boost_cutoff", "value": 15, "unit": "Hz"},
+        {"name": "throttle_limit_type", "value": "OFF", "unit": "enum"},
+        {"name": "throttle_limit_percent", "value": 100, "unit": "percent"}
+      ],
+      "configParams": ["rates_type", "rcRates", "rates", "rcExpo", "rate_limit", "thrMid8", "thrExpo8", "thrHover8", "deadband", "yaw_deadband", "3d_deadband_throttle", "throttle_boost"],
+      "cleanRoomNotes": [
+        "Actual rates formula: out = C*x + (M-C)*[e*x^5 + (1-e)*x^3*|x|], C=70, M=670, e=0",
+        "Throttle is two-segment cubic Bezier; with expo=0 it degenerates to linear y=x",
+        "Precompute 12-entry throttle LUT and linear-interpolate at runtime"
+      ],
+      "evidenceGaps": ["RaceFlight/KISS rates not implemented", "stick acceleration limits not detailed"]
+    },
+    {
+      "id": "setpoint_preprocess",
+      "purpose": "RC smoothing (PT3), feedforward, TPA",
+      "sourceFiles": [
+        {"path": "src/main/fc/rc.c", "functions": ["rcSmoothingUpdate", "calculateFeedforward", "initRcSmoothingFilters"]},
+        {"path": "src/main/flight/pid.c", "functions": ["getTpaFactor", "getTpaFactorClassic"]}
+      ],
+      "defaults": [
+        {"name": "rc_smoothing", "value": 1, "unit": "bool"},
+        {"name": "rc_smoothing_auto_factor_rpy", "value": 30, "unit": "/10"},
+        {"name": "rc_smoothing_auto_factor_throttle", "value": 30, "unit": "/10"},
+        {"name": "setpoint_cutoff_floor", "value": 15, "unit": "Hz"},
+        {"name": "feedforward_smooth_factor", "value": 65, "unit": "/100"},
+        {"name": "feedforward_jitter_factor", "value": 7, "unit": "count"},
+        {"name": "feedforward_boost", "value": 15, "unit": "scale"},
+        {"name": "feedforward_max_rate_limit", "value": 90, "unit": "percent"},
+        {"name": "feedforward_yaw_hold_gain", "value": 15, "unit": "scale"},
+        {"name": "feedforward_yaw_hold_time", "value": 100, "unit": "ms"},
+        {"name": "tpa_mode", "value": "D", "unit": "enum"},
+        {"name": "tpa_rate", "value": 65, "unit": "/1000"},
+        {"name": "tpa_breakpoint", "value": 1350, "unit": "us"},
+        {"name": "tpa_low_rate", "value": 20, "unit": "/1000"},
+        {"name": "tpa_low_breakpoint", "value": 1050, "unit": "us"}
+      ],
+      "configParams": ["rc_smoothing", "rc_smoothing_auto_factor_rpy/throttle", "feedforward_boost", "tpa_mode", "tpa_rate", "tpa_breakpoint"],
+      "cleanRoomNotes": [
+        "PT3 = three cascaded PT1 filters",
+        "TPA factor = 1 - tpa_rate/1000 * max(thr-bp,0); applies to D (and P in PD mode)",
+        "Feedforward = d(setpoint)/dt * rxRateHz, lightly filtered"
+      ],
+      "evidenceGaps": ["rc_smoothing manual cutoff override path not traced", "feedforward averaging modes not enumerated"]
+    },
+    {
+      "id": "gyro",
+      "purpose": "Gyro calibration and software filter chain",
+      "sourceFiles": [
+        {"path": "src/main/sensors/gyro.c", "functions": ["gyroInit", "gyroUpdate", "gyroReadRegister"]},
+        {"path": "src/main/sensors/gyro_filter_impl.c", "functions": ["GYRO_FILTER_FUNCTION_NAME"]}
+      ],
+      "defaults": [
+        {"name": "gyro_cal_duration", "value": 1.25, "unit": "s"},
+        {"name": "gyroMovementCalibrationThreshold", "value": 48, "unit": "LSB"},
+        {"name": "gyro_lpf1_type", "value": "PT1", "unit": "enum"},
+        {"name": "gyro_lpf1_dyn_min_hz", "value": 250, "unit": "Hz"},
+        {"name": "gyro_lpf1_dyn_max_hz", "value": 500, "unit": "Hz"},
+        {"name": "gyro_lpf1_dyn_expo", "value": 5, "unit": "/10"},
+        {"name": "gyro_lpf2_type", "value": "PT1", "unit": "enum"},
+        {"name": "gyro_lpf2_static_hz", "value": 500, "unit": "Hz"},
+        {"name": "gyro_soft_notch_hz_1", "value": 0, "unit": "Hz (off)"},
+        {"name": "gyro_soft_notch_hz_2", "value": 0, "unit": "Hz (off)"},
+        {"name": "yaw_spin_threshold", "value": 1950, "unit": "dps"}
+      ],
+      "configParams": ["gyro_lpf1_type/static/dyn_min/max/expo", "gyro_lpf2", "notch1/2 hz/cutoff", "yaw_spin_recovery"],
+      "cleanRoomNotes": [
+        "Filter order: downsample -> RPM filter -> notch1 -> notch2 -> LPF1 -> dyn notch",
+        "For MC virtual gyro, only the D-term LPF (~100Hz) matters",
+        "Calibration not needed for virtual sensor"
+      ],
+      "evidenceGaps": ["dyn_notch_filter.c FFT params not deep-read", "rpm_filter.c harmonic/Q not detailed", "hardware LPF bank details target-dependent"]
+    },
+    {
+      "id": "pid",
+      "purpose": "PID controller core: P/I/D/FF, anti-gravity, I-term relax, crash recovery, level/horizon",
+      "sourceFiles": [
+        {"path": "src/main/flight/pid.c", "functions": ["pidController", "pidLevel", "calcHorizonLevelStrength", "applyItermRelax", "crashRecovery"]},
+        {"path": "src/main/flight/pid.h", "functions": ["PID_ROLL_DEFAULT", "PTERM_SCALE", "ITERM_SCALE", "DTERM_SCALE"]}
+      ],
+      "defaults": [
+        {"name": "Roll P/I/D/FF", "value": "45/80/30/120", "unit": "tune units"},
+        {"name": "Pitch P/I/D/FF", "value": "47/84/34/125", "unit": "tune units"},
+        {"name": "Yaw P/I/D/FF", "value": "45/80/0/120", "unit": "tune units"},
+        {"name": "PTERM_SCALE", "value": 0.032029, "unit": "per tune unit"},
+        {"name": "ITERM_SCALE", "value": 0.244381, "unit": "per tune unit"},
+        {"name": "DTERM_SCALE", "value": 0.000529, "unit": "per tune unit"},
+        {"name": "pidSumLimit", "value": 500, "unit": "pid units"},
+        {"name": "pidSumLimitYaw", "value": 400, "unit": "pid units"},
+        {"name": "itermLimit", "value": 400, "unit": "pid units"},
+        {"name": "itermLimitYaw", "value": 400, "unit": "pid units"},
+        {"name": "anti_gravity_cutoff_hz", "value": 5, "unit": "Hz"},
+        {"name": "anti_gravity_gain", "value": 80, "unit": "scale"},
+        {"name": "anti_gravity_p_gain", "value": 100, "unit": "scale"},
+        {"name": "iterm_relax", "value": "RP", "unit": "enum"},
+        {"name": "iterm_relax_cutoff", "value": 15, "unit": "Hz"},
+        {"name": "iterm_relax_type", "value": "SETPOINT", "unit": "enum"},
+        {"name": "dterm_lpf1_dyn_min_hz", "value": 75, "unit": "Hz"},
+        {"name": "dterm_lpf1_dyn_max_hz", "value": 150, "unit": "Hz"},
+        {"name": "dterm_lpf2_static_hz", "value": 150, "unit": "Hz"},
+        {"name": "yaw_lpf_hz", "value": 100, "unit": "Hz"},
+        {"name": "crash_recovery", "value": "OFF", "unit": "enum"},
+        {"name": "crash_dthreshold", "value": 50, "unit": "dps/s^2"},
+        {"name": "crash_gthreshold", "value": 400, "unit": "dps"},
+        {"name": "crash_setpoint_threshold", "value": 350, "unit": "dps"},
+        {"name": "crash_time", "value": 500, "unit": "ms"},
+        {"name": "crash_recovery_angle", "value": 10, "unit": "deg"},
+        {"name": "crash_recovery_rate", "value": 100, "unit": "dps"},
+        {"name": "angle_level_strength", "value": 50, "unit": "tune"},
+        {"name": "horizon_level_strength", "value": 50, "unit": "tune"},
+        {"name": "horizon_limit_degrees", "value": 135, "unit": "deg"},
+        {"name": "horizon_delay_ms", "value": 500, "unit": "ms"}
+      ],
+      "configParams": ["pid[ROLL/PITCH/YAW/LEVEL].P/I/D/FF", "tpa", "iterm_relax", "dterm_lpf", "anti_gravity", "crash_recovery", "angle/horizon strength"],
+      "cleanRoomNotes": [
+        "D term uses NEGATIVE gyro derivative: delta = -(gyro - prevGyro)*pidFreq",
+        "P = Kp*error, I = constrain(I + Ki*dt*itermError, ±itermLimit), D = Kd*negativeGyroDelta",
+        "Anti-gravity boosts I based on throttle derivative (squared term)",
+        "I-term relax scales down integrator when setpoint moves fast"
+      ],
+      "evidenceGaps": ["S-term (fixed-wing) not covered", "simplified tuning scaling not derived", "PID loop looptime target-specific"]
+    },
+    {
+      "id": "mixer",
+      "purpose": "Quad-X mixer table, airmode, idle, motor output scaling",
+      "sourceFiles": [
+        {"path": "src/main/flight/mixer_init.c", "functions": ["multicopterMixerMixers"]},
+        {"path": "src/main/flight/mixer.c", "functions": ["mixerReset", "mixerCalculate", "applyMotorLimits", "mixerUseUnsyncedPwm"]},
+        {"path": "src/main/drivers/motor.c", "functions": ["motorInitEndpoints", "motorWrite"]},
+        {"path": "src/main/drivers/dshot.c", "functions": ["dshotInitEndpoints"]},
+        {"path": "src/main/pg/motor.c", "functions": ["pgResetFn_motorConfig"]}
+      ],
+      "defaults": [
+        {"name": "M1 REAR_R mix", "value": "thr=+1, roll=-1, pitch=+1, yaw=-1", "unit": "coefficient"},
+        {"name": "M2 FRONT_R mix", "value": "thr=+1, roll=-1, pitch=-1, yaw=+1", "unit": "coefficient"},
+        {"name": "M3 REAR_L mix", "value": "thr=+1, roll=+1, pitch=+1, yaw=+1", "unit": "coefficient"},
+        {"name": "M4 FRONT_L mix", "value": "thr=+1, roll=+1, pitch=-1, yaw=-1", "unit": "coefficient"},
+        {"name": "PID_MIXER_SCALING", "value": 1000, "unit": "scale"},
+        {"name": "motorIdle (brushless)", "value": 5.5, "unit": "percent"},
+        {"name": "maxthrottle", "value": 2000, "unit": "us"},
+        {"name": "mincommand", "value": 1000, "unit": "us"},
+        {"name": "DSHOT_MIN_THROTTLE", "value": 48, "unit": "dshot"},
+        {"name": "DSHOT_MAX_THROTTLE", "value": 2047, "unit": "dshot"},
+        {"name": "DSHOT_3D_FORWARD_MIN_THROTTLE", "value": 1048, "unit": "dshot"},
+        {"name": "motorPoleCount", "value": 14, "unit": "pole pairs"}
+      ],
+      "configParams": ["mixer (QUADX default)", "airmode", "min_throttle", "max_throttle", "motor_idle", "dshot_bitbang"],
+      "cleanRoomNotes": [
+        "motorOutput[i] = min + (max-min) * clamp(throttle + mixSign*(roll*R_i + pitch*P_i + yaw*Y_i))",
+        "Airmode off below 50% throttle: RPY authority ramps 50%->100% as throttle 0->0.5",
+        "3D reverses mix sign and maps throttle around midrc=1500"
+      ],
+      "evidenceGaps": ["other mixer tables (HexaX, OctoX) not listed", "DSHOT telemetry protocol not detailed"]
+    },
+    {
+      "id": "battery",
+      "purpose": "VBAT divider, cell count detection, mAh integration, low-voltage alarms",
+      "sourceFiles": [
+        {"path": "src/main/sensors/battery.c", "functions": ["pgResetFn_batteryProfiles", "autoDetectCellCount", "recalculateBatteryThresholds", "calculateBatteryPercentageRemaining", "batteryUpdateLVC"]},
+        {"path": "src/main/sensors/voltage.c", "functions": ["voltageAdcToVoltage", "pgResetFn_voltageSensorADCConfig"]},
+        {"path": "src/main/sensors/current.c", "functions": ["updateCurrentmAhDrawnState"]}
+      ],
+      "defaults": [
+        {"name": "vbatscale", "value": 110, "unit": "/100"},
+        {"name": "vbatresdivval", "value": 10, "unit": "divider ratio (10:1)"},
+        {"name": "vbatresdivmultiplier", "value": 1, "unit": "multiplier"},
+        {"name": "vbatmaxcellvoltage", "value": 430, "unit": "0.01V (4.30V)"},
+        {"name": "vbatfullcellvoltage", "value": 410, "unit": "0.01V (4.10V)"},
+        {"name": "vbatwarningcellvoltage", "value": 350, "unit": "0.01V (3.50V)"},
+        {"name": "vbatmincellvoltage", "value": 330, "unit": "0.01V (3.30V)"},
+        {"name": "vbatnotpresentcellvoltage", "value": 300, "unit": "0.01V (3.00V)"},
+        {"name": "vbathysteresis", "value": 1, "unit": "0.01V"},
+        {"name": "MAX_AUTO_DETECT_CELL_COUNT", "value": 8, "unit": "cells"},
+        {"name": "consumptionWarningPercentage", "value": 10, "unit": "percent"},
+        {"name": "lvcPercentage", "value": 100, "unit": "percent (off)"},
+        {"name": "LVC_AFFECT_TIME", "value": 10, "unit": "s ramp"},
+        {"name": "vbatDisplayLpfPeriod", "value": 30, "unit": "period"},
+        {"name": "DEFAULT_IBAT_LPF_PERIOD", "value": 10, "unit": "period"}
+      ],
+      "configParams": ["vbat_scale", "vbat_divider", "vbat_min/warn/max/full_cellvoltage", "battery_capacity", "lvc_percentage"],
+      "cleanRoomNotes": [
+        "Cells = floor(Vbat / vbatmaxcellvoltage) + 1, capped at 8",
+        "mAhDrawn += I[A] * dt[s] / 3600; Wh += V[V] * dmAh / 1000",
+        "Percentage = (capacity - mAhDrawn)/capacity if configured, else linear V interpolation"
+      ],
+      "evidenceGaps": ["virtual current meter model not detailed", "vbat sag compensation closed loop not analyzed"]
+    },
+    {
+      "id": "osd",
+      "purpose": "OSD element catalogue, units, coordinate system",
+      "sourceFiles": [
+        {"path": "src/main/osd/osd.h", "functions": ["osd_items_e", "osd_stats_e", "OSD_POS macro", "OSD_SD_COLS/ROWS", "OSD_HD_COLS/ROWS"]},
+        {"path": "src/main/osd/osd_elements.c", "functions": ["osdDraw*"]}
+      ],
+      "defaults": [
+        {"name": "SD columns (PAL)", "value": 30, "unit": "chars"},
+        {"name": "SD rows (PAL)", "value": 16, "unit": "chars"},
+        {"name": "HD columns", "value": 53, "unit": "chars"},
+        {"name": "HD rows", "value": 20, "unit": "chars"},
+        {"name": "OSD_POS bits", "value": "5-bit X | 5-bit Y | 1 ext-X | 2 type", "unit": "16-bit"},
+        {"name": "default framerate", "value": 12, "unit": "Hz"},
+        {"name": "element count", "value": "100+", "unit": "enum entries"},
+        {"name": "stats count", "value": 32, "unit": "bitmask"}
+      ],
+      "configParams": ["osd_profile", "element positions", "enabled warnings", "timer source/precision/alarm"],
+      "cleanRoomNotes": [
+        "Only CROSSHAIRS / ARTIFICIAL_HORIZON / HORIZON_SIDEBARS are center-anchored; others are user-positionable",
+        "Voltage in 0.01V, current in 0.01A, angle in 0.1deg, RSSI 0-100%",
+        "MC HUD can use pixel coordinates directly; character grid not necessary"
+      ],
+      "evidenceGaps": ["per-element draw details not enumerated", "HD OSD (DJI/Walksnail) encoding not covered"]
+    },
+    {
+      "id": "blackbox",
+      "purpose": "Blackbox logging fields, sample rate, encoding",
+      "sourceFiles": [
+        {"path": "src/main/blackbox/blackbox.c", "functions": ["blackboxWriteIntraframe", "blackboxWriteInterframe", "blackboxOpenLog"]},
+        {"path": "src/main/blackbox/blackbox_encoding.c", "functions": ["blackboxWriteUnsignedVB", "blackboxWriteSignedVB"]},
+        {"path": "src/main/blackbox/blackbox.h", "functions": ["blackboxRate_e"]}
+      ],
+      "defaults": [
+        {"name": "sample_rate", "value": "QUARTER", "unit": "1/4 PID loop"},
+        {"name": "device", "value": "NONE", "unit": "enum"},
+        {"name": "mode", "value": "NORMAL", "unit": "enum"},
+        {"name": "high_resolution", "value": false, "unit": "bool"},
+        {"name": "blackbox_baud", "value": 115200, "unit": "bps"},
+        {"name": "data_version", "value": 2, "unit": "format version"}
+      ],
+      "configParams": ["blackbox_rate_num/denom", "blackbox_device", "fields_disabled_mask"],
+      "cleanRoomNotes": [
+        "Core fields to mirror for MC telemetry: time, rcCommand[4], setpoint[3], gyro[3], axisP/I/D/F[3], motor[N], vbat, mAhDrawn, flightModeFlags",
+        "I-frames are full, P-frames are delta-encoded with predictors (PREVIOUS/INC/STRAIGHT_LINE)",
+        "For MC mod, CSV/Protobuf is fine; copy field list not wire format"
+      ],
+      "evidenceGaps": ["complete field table not enumerated", "GPS lap timer integration not read"]
+    },
+    {
+      "id": "modes",
+      "purpose": "AUX mode box semantics, ARM/ANGLE/HORIZON/3D/AIRMODE/HEADFREE/BEEPER/LED",
+      "sourceFiles": [
+        {"path": "src/main/fc/rc_modes.h", "functions": ["boxId_e", "MAX_MODE_ACTIVATION_CONDITION_COUNT=20"]},
+        {"path": "src/main/fc/rc_modes.c", "functions": ["updateActivatedModes", "isRangeActive"]},
+        {"path": "src/main/flight/imu.c", "functions": ["imuQuaternionHeadfreeOffsetSet", "imuQuaternionHeadfreeTransformVectorEarthToBody"]}
+      ],
+      "defaults": [
+        {"name": "MAX_MODE_ACTIVATION_CONDITION_COUNT", "value": 20, "unit": "macs"},
+        {"name": "mode range step", "value": 25, "unit": "us/step"},
+        {"name": "ARM", "value": "requires all arming checks", "unit": "bool"},
+        {"name": "AIRMODE", "value": "feature or BOX", "unit": "bool"},
+        {"name": "HEADFREE", "value": "latches yaw offset on enable", "unit": "bool"}
+      ],
+      "configParams": ["modeActivationConditions[20]"],
+      "cleanRoomNotes": [
+        "Each MAC: {modeId, auxChannel, range{startStep,endStep}, logic(AND/OR), linkedTo}",
+        "HEADFREE: store yaw0 on entry, rotate earth-frame stick vector by offset*quat every frame",
+        "Sticky modes (BOXPARALYZE, BOXBLACKBOXERASE) latch on first transition"
+      ],
+      "evidenceGaps": ["arming logic bitmask (ARMING_DISABLE_*) not enumerated", "stick commands (arm/disarm/flip) not detailed"]
+    }
+  ]
+}

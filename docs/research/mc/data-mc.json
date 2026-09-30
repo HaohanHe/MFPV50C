@@ -1,0 +1,211 @@
+{
+  "meta": {
+    "gameVersion": "1.21.11",
+    "modLoader": "Fabric Loom 1.18.2",
+    "mappings": "officialMojangMappings (mojmap)",
+    "clientSideOnly": true,
+    "fetchedAt": "2026-09-29",
+    "verificationMethod": "Loom genSources (Vineflower, 6622 classes) + javap -p -constants on merged named jar"
+  },
+  "overallVerdict": {
+    "pureClientFpv": "FEASIBLE but split: camera-roll/attitude + direct GLFW RC input are 100% client-side and server-invisible; any client-side translation/thrust change is free in singleplayer, tolerated within vanilla thresholds on own server, rubber-banded on public vanilla, and flagged/banned on prediction anti-cheats.",
+    "rubberBandThresholds": {
+      "speedSquaredWalk": 100.0,
+      "speedSquaredElytra": 300.0,
+      "multiplierQ": "move packets since last server tick, capped at 5, forced to 1 if >5",
+      "condition": "p - o > r*q where p=dx^2+dy^2+dz^2 from firstGood, o=server deltaMovement lengthSqr",
+      "collisionResidualSq": 0.0625,
+      "collisionResidualBlocks": 0.25,
+      "clampHorizontal": 3.0E7,
+      "clampVertical": 2.0E7,
+      "nanDisconnect": true,
+      "rollSentToServer": false
+    }
+  },
+  "areas": [
+    {
+      "id": "elytra",
+      "title": "Elytra flight chain",
+      "findings": [
+        {
+          "claim": "Elytra start triggered client-side by jump key while airborne",
+          "evidence": {"class": "LocalPlayer", "method": "aiStep", "line": "825", "constant": "input.keyPresses.jump() && !onClimbable() && tryToStartFallFlying()"},
+          "status": "verified",
+          "risk": "low",
+          "safeApproach": "Trigger elytra via vanilla jump; do not force flag locally."
+        },
+        {
+          "claim": "tryToStartFallFlying requires !isFallFlying && canGlide() && !isInWater; startFallFlying sets shared flag 7 (FALL_FLYING) which syncs to server",
+          "evidence": {"class": "Player", "method": "tryToStartFallFlying/startFallFlying", "line": "1441/1450", "constant": "setSharedFlag(7,true)"},
+          "status": "verified",
+          "risk": "low",
+          "safeApproach": "Do not fake fall-flying; server re-checks canGlide every tick."
+        },
+        {
+          "claim": "canGlide requires !onGround && !isPassenger && no LEVITATION && an elytra item in any EquipmentSlot",
+          "evidence": {"class": "LivingEntity", "method": "canGlide", "line": "3045"},
+          "status": "verified",
+          "risk": "low",
+          "safeApproach": "Maintain valid elytra; server clears flag if canGlide() false."
+        },
+        {
+          "claim": "Server maintains glide: updateFallFlying runs only when isFallFlying; durability (hurtAndBreak 1 every 10 ticks, alternating) and ELYTRA_GLIDE game event are server-side only; server forces stop if !canGlide()",
+          "evidence": {"class": "LivingEntity", "method": "updateFallFlying", "line": "3020-3042", "constant": "i%10==0; i/10%2==0; hurtAndBreak(1,...)"},
+          "status": "verified",
+          "risk": "low",
+          "safeApproach": "Client cannot extend glide beyond server canGlide(); it will be reverted."
+        },
+        {
+          "claim": "Firework thrust on gliding wearer: per tick deltaMovement += look*0.1 + (look*1.5 - deltaMovement)*0.5",
+          "evidence": {"class": "FireworkRocketEntity", "method": "tick", "line": "124-132", "constant": "target=1.5, linear=0.1, blend=0.5; lifetime=10*(1+flightDuration)+rand"},
+          "status": "verified",
+          "risk": "medium",
+          "safeApproach": "Use real firework entities; do not fabricate client thrust. Thrust is replicated server-side by the rocket entity."
+        },
+        {
+          "claim": "Glide physics updateFallFlyingMovement: gravity g*(-1+0.75*cos(xRot)^2), lift on descent, up-boost on pitch-up (y*3.2), 0.1 steer toward look, damping (0.99,0.98,0.99); runs on both client and server",
+          "evidence": {"class": "LivingEntity", "method": "updateFallFlyingMovement/travelFallFlying", "line": "2455/2434"},
+          "status": "verified",
+          "risk": "medium",
+          "safeApproach": "Modifying this curve deviates from server physics; only do it in singleplayer."
+        }
+      ]
+    },
+    {
+      "id": "movement",
+      "title": "Client movement boundary and rubber-band",
+      "findings": [
+        {
+          "claim": "Client sends its real position + yRot/xRot + onGround/horizontalCollision every tick; no roll/quaternion in packet",
+          "evidence": {"class": "LocalPlayer", "method": "sendPosition", "line": "260-296", "constant": "send threshold lengthSq>2.0E-4 or positionReminder>=20"},
+          "status": "verified",
+          "risk": "info",
+          "safeApproach": "Roll never leaves the client; safe to inject freely."
+        },
+        {
+          "claim": "Speed check: r=300 if fall-flying else 100; triggers teleport-back when p-o > r*q; skipped for singleplayer owner, dimension change, or PLAYER_MOVEMENT_CHECK off",
+          "evidence": {"class": "ServerGamePacketListenerImpl", "method": "handleMovePlayer/shouldCheckPlayerMovement", "line": "1078/1164", "constant": "r=300.0F/100.0F; gamerules PLAYER_MOVEMENT_CHECK & ELYTRA_MOVEMENT_CHECK default true"},
+          "status": "verified",
+          "risk": "high on public server",
+          "safeApproach": "Keep client-side added displacement squared under ~100 (walk)/~300 (elytra) per packet budget; prefer enabling translation only in singleplayer."
+        },
+        {
+          "claim": "Collision check: after server move, residual p>0.0625 (0.25 blocks) and new collision => hard teleport to last good position; otherwise accept client position",
+          "evidence": {"class": "ServerGamePacketListenerImpl", "method": "handleMovePlayer", "line": "1109/1152/1121", "constant": "0.0625"},
+          "status": "verified",
+          "risk": "high on public server",
+          "safeApproach": "Never clip through blocks; residual must stay below 0.25 blocks."
+        },
+        {
+          "claim": "NaN/non-finite coordinates disconnect; horizontal clamp +/-3e7, vertical +/-2e7",
+          "evidence": {"class": "ServerGamePacketListenerImpl", "method": "containsInvalidValues/clampHorizontal/clampVertical", "line": "420/424/428", "constant": "3.0E7 / 2.0E7"},
+          "status": "verified",
+          "risk": "medium",
+          "safeApproach": "Guard RC-derived values against NaN/extreme magnitudes."
+        },
+        {
+          "claim": "Rotation yRot/xRot is wrapped and accepted on the normal path; on speed violation the teleport back carries the server's own rotation",
+          "evidence": {"class": "ServerGamePacketListenerImpl", "method": "handleMovePlayer", "line": "1043/1081"},
+          "status": "verified",
+          "risk": "low",
+          "safeApproach": "RC-driven yaw/pitch is fine; expect rotation to be corrected together with position on any setback."
+        }
+      ]
+    },
+    {
+      "id": "camera",
+      "title": "Camera roll injection",
+      "findings": [
+        {
+          "claim": "Call chain GameRenderer.render -> updateCamera -> Camera.setup(level,entity,detached,mirrored,partialTick); then renderLevel builds view matrix from camera.rotation().conjugate()",
+          "evidence": {"class": "GameRenderer", "method": "updateCamera/renderLevel", "line": "706/716/755"},
+          "status": "verified",
+          "risk": "low",
+          "safeApproach": "Inject roll after Camera.setup, before renderLevel reads rotation."
+        },
+        {
+          "claim": "setRotation builds quaternionYXZ(PI-yRot, -xRot, 0.0F); roll third Euler angle hardcoded 0. forwards/up/left vectors derive from this.rotation",
+          "evidence": {"class": "Camera", "method": "setRotation", "line": "141"},
+          "status": "verified",
+          "risk": "low",
+          "safeApproach": "Right-multiply a roll quaternion onto this.rotation via mixin."
+        },
+        {
+          "claim": "FOV/near-plane distance unchanged by roll: near=0.05, up/left scaled by tan(fov/2); projection matrix excludes roll",
+          "evidence": {"class": "Camera", "method": "getNearPlane", "line": "198", "constant": "0.05; tan(fov/2)*0.05"},
+          "status": "verified",
+          "risk": "low",
+          "safeApproach": "Roll only rotates the screen; no perspective distortion."
+        },
+        {
+          "claim": "First-person hand/held item uses the same rolled view matrix as the world, so the hand follows the roll (fixed to view)",
+          "evidence": {"class": "GameRenderer", "method": "renderItemInHand", "line": "776", "constant": "matrix4f2 shared"},
+          "status": "verified",
+          "risk": "low",
+          "safeApproach": "No extra work; hand naturally stays glued to the rolled view."
+        },
+        {
+          "claim": "Third-person camera clip (getMaxZoom) raycasts along the rolled forwards; fluid/fog near-plane corner sampling follows roll",
+          "evidence": {"class": "Camera", "method": "getMaxZoom/getFluidInCamera", "line": "112/209"},
+          "status": "verified",
+          "risk": "low",
+          "safeApproach": "First-person FPV unaffected; minor fog-edge sampling offset at extreme roll."
+        }
+      ]
+    },
+    {
+      "id": "input",
+      "title": "GLFW joystick, KeyMapping, Screen lifecycle",
+      "findings": [
+        {
+          "claim": "Vanilla 1.21.11 has no joystick/gamepad abstraction; InputConstants.Type only KEYSYM/SCANCODE/MOUSE. USB remote must poll LWJGL GLFW joystick API directly.",
+          "evidence": {"class": "InputConstants", "method": "Type enum", "line": "325"},
+          "status": "verified",
+          "risk": "low",
+          "safeApproach": "Call glfwJoystickPresent/glfwGetJoystickAxes/glfwGetGamepadState from the client/render thread."
+        },
+        {
+          "claim": "Hotplug via glfwSetJoystickCallback fires during glfwPollEvents on the main thread; joystick state polling is safe on the render/client thread.",
+          "evidence": {"class": "Minecraft", "method": "runTick (glfwPollEvents)", "line": "render loop"},
+          "status": "inferred",
+          "risk": "low",
+          "safeApproach": "Register callback and poll axes each client tick on the main thread."
+        },
+        {
+          "claim": "Opening a Screen releases mouse and calls KeyMapping.releaseAll(); movement keys read as up while GUI open",
+          "evidence": {"class": "Minecraft", "method": "setScreen", "line": "1148"},
+          "status": "verified",
+          "risk": "low",
+          "safeApproach": "Config screen must override isPauseScreen()=false; RC is read directly so it keeps working."
+        },
+        {
+          "claim": "Pause only in singleplayer integrated server when screen.isPauseScreen() and world not LAN-published; pause stops level tick, particles, and ServerboundClientTickEndPacket",
+          "evidence": {"class": "Minecraft", "method": "pause computation", "line": "1340/1848-1859"},
+          "status": "verified",
+          "risk": "low",
+          "safeApproach": "Keep config screens non-pausing so flight continues."
+        }
+      ]
+    },
+    {
+      "id": "anticheat",
+      "title": "Multiplayer / anti-cheat boundary",
+      "findings": [
+        {
+          "claim": "Vanilla server trusts client position within speed (100/300) and collision (0.0625) tolerances; no deeper physics re-simulation",
+          "evidence": {"class": "ServerGamePacketListenerImpl", "method": "handleMovePlayer", "line": "1025"},
+          "status": "verified",
+          "risk": "medium",
+          "safeApproach": "Small client translation survives vanilla servers; expect rubber-band beyond thresholds."
+        },
+        {
+          "claim": "Prediction anti-cheats (Grim) replicate elytra physics server-side (PredictionEngineElytra) and flag any deviation; render-layer camera roll is not detectable server-side",
+          "evidence": {"class": "external: Grim DeepWiki / grim.ac", "method": "PredictionEngineElytra", "line": "n/a"},
+          "status": "inferred",
+          "risk": "high for translation mods, low for camera roll",
+          "safeApproach": "On Grim-grade servers ship camera-roll/RC-only mode; never alter translation/thrust."
+        }
+      ]
+    }
+  ]
+}
