@@ -86,6 +86,11 @@
 
   "gui.fpv.race_enabled": "Race Mode (gates/timing): %s",
   "gui.fpv.airframe": "Airframe Physics >",
+  "gui.fpv.modes": "Modes Routing >",
+  "gui.fpv.mode_add": "+ Add Binding",
+  "gui.fpv.mode_neg": "NOT",
+  "gui.fpv.mode_normal": "Normal",
+  "gui.fpv.modes_need_device": "Modes require an attached USB device profile.",
   "gui.fpv.airframe_new": "New",
   "gui.fpv.airframe_copy": "Copy",
   "gui.fpv.airframe_del": "Delete",

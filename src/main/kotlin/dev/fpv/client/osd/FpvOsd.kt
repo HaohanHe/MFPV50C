@@ -1,6 +1,7 @@
 /*
  * FPV Craft - MIT
- * FPV OSD. Element positions/enabled flags come from [OsdLayout] (data-driven);
+ * FPV OSD. Element positions/enabled flags come from the PERSISTED
+ * [dev.fpv.flight.FpvConfig.osdElements] list (edited by OsdEditorScreen);
  * only the crosshair, artificial horizon and horizon sidebars are center-anchored.
  * Adds a virtual battery readout, virtual link quality (explicitly marked as
  * simulated), flight timer and a central transient warning (low battery / RX
@@ -27,6 +28,9 @@ object FpvOsd {
     private const val RED_FILL = 0xFFFF5555.toInt()
     private const val CYAN = 0xFF55FFFF.toInt()
     private const val GRAY = 0xFFAAAAAA.toInt()
+
+    /** Pixels the artificial horizon shifts per unit of world-up depth (pitch). */
+    private const val HORIZON_PITCH_PX = 120f
 
     fun draw(ctx: GuiGraphics) {
         val mc = Minecraft.getInstance()
@@ -128,7 +132,8 @@ object FpvOsd {
             ctx.drawString(font, String.format("T+%d:%02d", s / 60, s % 60), e.x, e.y, GRAY, true)
         }
 
-        // Throttle at its persisted position (a stored y of 0 anchors bottom).
+        // Throttle drawn at its persisted x/y (the editor fully controls it;
+        // no hidden bottom-anchor override anymore).
         if (el(OsdLayout.THROTTLE)?.enabled == true) {
             val e = el(OsdLayout.THROTTLE)!!
             val thr = FpvClient.throttle
@@ -137,8 +142,7 @@ object FpvOsd {
             } else {
                 String.format("THR %3d%%", (thr * 100).toInt())
             }
-            val ty = if (e.y <= 0) sh - 20 else e.y
-            ctx.drawString(font, thrStr, e.x, ty, GREEN, true)
+            ctx.drawString(font, thrStr, e.x, e.y, GREEN, true)
         }
 
         // Mode banner (centered).
@@ -148,7 +152,12 @@ object FpvOsd {
                 if (cfg.reversible3D) append(" 3D")
                 if (cfg.headfreeEnabled) append(" HF")
             }
-            ctx.drawCenteredString(font, "FPV $modeTag", cx, 8, GREEN)
+            // Persistent ARM/DISARM marker alongside the flight mode.
+            val armTag = if (FpvClient.armed) " ARM" else " DISARM"
+            ctx.drawCenteredString(
+                font, "FPV $modeTag$armTag", cx, 8,
+                if (FpvClient.armed) GREEN else RED,
+            )
         }
 
         // ---- Center-anchored: artificial horizon + sidebars + crosshair ----
@@ -158,13 +167,18 @@ object FpvOsd {
         // seen in the already-rolled FPV picture (verified: roll-right 20 ->
         // true horizon -20 on screen, old sign drew +20).
         val roll = atan2(bodyUp.x, bodyUp.y)
+        // Pitch translation: world-up gains a screen-depth component [bodyUp.z]
+        // as the nose pitches; shift the horizon group vertically by that much
+        // (px per unit of body-up depth). SIGN IS BENCH-VERIFYABLE on first
+        // real flight -- if pitch draws the line the wrong way, negate the sign.
+        val pitchOffset = -bodyUp.z * HORIZON_PITCH_PX
 
         if (el(OsdLayout.ARTIFICIAL_HORIZON)?.enabled == true ||
             el(OsdLayout.HORIZON_SIDEBARS)?.enabled == true
         ) {
             val pose = ctx.pose()
             pose.pushMatrix()
-            pose.translate(cx.toFloat(), cy.toFloat())
+            pose.translate(cx.toFloat(), cy.toFloat() + pitchOffset)
             pose.rotate(roll)
             if (el(OsdLayout.ARTIFICIAL_HORIZON)?.enabled == true) {
                 ctx.fill(-30, -1, 30, 1, GREEN_FILL)

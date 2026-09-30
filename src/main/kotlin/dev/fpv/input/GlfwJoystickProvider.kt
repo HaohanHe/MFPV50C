@@ -113,6 +113,9 @@ class GlfwJoystickProvider(private val cfg: FpvConfig) : InputProvider {
         ch.aux = aux
 
         ch.auxChannels = cfg.auxChannels.map { evalAux(it) }
+        // Carry raw button/hat snapshots for data-driven mode routing.
+        ch.rawButtons = lastButtons.copyOf()
+        ch.rawHats = lastHats.copyOf()
         return ch
     }
 

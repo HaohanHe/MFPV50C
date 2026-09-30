@@ -9,6 +9,8 @@
 package dev.fpv.client.gui
 
 import dev.fpv.client.FpvClient
+import dev.fpv.input.ChannelNormalizer
+import dev.fpv.input.SlotCalib
 import net.minecraft.client.gui.GuiGraphics
 import net.minecraft.client.gui.components.Button
 import net.minecraft.client.gui.screens.Screen
@@ -31,10 +33,11 @@ class MonitorScreen(private val parent: Screen?) :
     // Previous frame for change detection.
     private var prevAxes = FloatArray(0)
     private var prevButtons = ByteArray(0)
+    private var prevHats = ByteArray(0)
     private var seeded = false
 
     // Most-recently-active source (kept on screen for ACTIVE_HOLD_MS).
-    private var activeKind = -1   // 0 axis, 1 button
+    private var activeKind = -1   // 0 axis, 1 button, 2 hat
     private var activeIdx = -1
     private var activeTime = 0L
 
@@ -71,15 +74,43 @@ class MonitorScreen(private val parent: Screen?) :
         dev.fpv.input.StickSlot.RV -> "Pitch"
     }
 
+    /**
+     * Normalized (-1..1) value of raw axis [idx] through whatever calibration
+     * currently binds it (gimbal slot or aux axis). Unbound axes are already in
+     * [-1,1] from GLFW, so they pass through unchanged.
+     */
+    private fun normAxis(idx: Int): Float {
+        val raw = axSnapshot.getOrElse(idx) { 0f }
+        for (slot in dev.fpv.input.StickSlot.entries) {
+            val sc = cfg.slotCalib[slot.ordinal]
+            if (sc.type == "AXIS" && sc.axisIndex == idx) return ChannelNormalizer.centered(raw, sc)
+        }
+        val a = cfg.auxChannels.firstOrNull { it.kind == "AXIS" && it.axisIndex == idx }
+        if (a != null) {
+            val sc = SlotCalib(
+                type = "AXIS", axisIndex = idx, reversed = a.reversed,
+                rawMin = a.rawMin, rawMid = a.rawMid, rawMax = a.rawMax,
+                deadzone = a.deadzone, learned = a.learned,
+            )
+            return ChannelNormalizer.centered(raw, sc)
+        }
+        return raw
+    }
+
+    private lateinit var axSnapshot: FloatArray
+
     override fun render(g: GuiGraphics, mouseX: Int, mouseY: Int, delta: Float) {
         // Background already drawn by renderWithTooltipAndSubtitles.
         FpvClient.input.rawAxes()
         val ax = FpvClient.input.axes()
         val bt = FpvClient.input.buttons()
         val ht = FpvClient.input.hats()
+        axSnapshot = ax
 
-        // ---- Change detection ----
-        if (!seeded || prevAxes.size != ax.size || prevButtons.size != bt.size) {
+        // ---- Change detection (axes + buttons + hats, all dynamic counts) ----
+        if (!seeded || prevAxes.size != ax.size || prevButtons.size != bt.size ||
+            prevHats.size != ht.size
+        ) {
             activeKind = -1; activeIdx = -1
         } else {
             var best = 0f
@@ -90,9 +121,12 @@ class MonitorScreen(private val parent: Screen?) :
             for (i in bt.indices) {
                 if (bt[i] != prevButtons[i]) { best = 1f; activeKind = 1; activeIdx = i }
             }
+            for (i in ht.indices) {
+                if (ht[i] != prevHats[i]) { best = 1f; activeKind = 2; activeIdx = i }
+            }
             if (best > 0.08f) activeTime = System.currentTimeMillis()
         }
-        prevAxes = ax.copyOf(); prevButtons = bt.copyOf(); seeded = true
+        prevAxes = ax.copyOf(); prevButtons = bt.copyOf(); prevHats = ht.copyOf(); seeded = true
 
         val activeFresh = System.currentTimeMillis() - activeTime < ACTIVE_HOLD_MS
         val showActive = activeFresh && activeKind >= 0
@@ -102,7 +136,8 @@ class MonitorScreen(private val parent: Screen?) :
             "Device: " + FpvClient.input.fingerprint().ifEmpty { "—" }), 8, 4, DIM)
         val activeText = if (showActive) when (activeKind) {
             0 -> "ACTIVE  Axis ${activeIdx + 1}" + (axisRole(activeIdx).let { if (it.isEmpty()) "" else " ($it)" })
-            else -> "ACTIVE  Btn ${activeIdx + 1}" + (buttonRole(activeIdx).let { if (it.isEmpty()) "" else " ($it)" })
+            1 -> "ACTIVE  Btn ${activeIdx + 1}" + (buttonRole(activeIdx).let { if (it.isEmpty()) "" else " ($it)" })
+            else -> "ACTIVE  Hat ${activeIdx + 1} (0x%02X)".format(ht[activeIdx].toInt())
         } else "Move any control to identify it"
         g.drawString(font, Component.literal(activeText), 8, 15, if (showActive) WARN else DIM)
 
@@ -127,7 +162,8 @@ class MonitorScreen(private val parent: Screen?) :
             val v = ax[i].coerceIn(-1f, 1f)
             if (v >= 0) g.fill(cxBar, y + 2, cxBar + (barW / 2 * v).toInt(), y + 6, GOOD)
             else g.fill(cxBar + (barW / 2 * v).toInt(), y + 2, cxBar, y + 6, BAD)
-            g.drawString(font, Component.literal("%.2f".format(ax[i])), barX + barW + 3, y,
+            g.drawString(font, Component.literal(
+                "%.2f  %+.2f".format(ax[i], normAxis(i))), barX + barW + 3, y,
                 if (isAct) WARN else DIM)
         }
 
@@ -158,8 +194,10 @@ class MonitorScreen(private val parent: Screen?) :
             g.drawString(font, Component.literal("HATS (${ht.size})"), 8, hy, WHITE); hy += 10
             for (i in ht.indices) {
                 if (hy > height - 36) break
-                g.drawString(font, Component.literal("Hat${i + 1}: 0x%02X".format(ht[i].toInt())),
-                    12, hy, GOOD); hy += 9
+                val isAct = activeFresh && activeKind == 2 && activeIdx == i
+                g.drawString(font, Component.literal(
+                    "Hat${i + 1}: 0x%02X".format(ht[i].toInt())),
+                    12, hy, if (isAct) WARN else GOOD); hy += 9
             }
         }
 

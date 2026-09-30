@@ -17,6 +17,8 @@
  */
 package dev.fpv.flight
 
+import kotlin.math.sqrt
+
 class ThrottleCurve(private val cfg: FpvConfig) {
 
     private var hp = HighPass(Defaults.THROTTLE_BOOST_CUTOFF_HZ)
@@ -26,17 +28,30 @@ class ThrottleCurve(private val cfg: FpvConfig) {
     private var builtMid = -1f
     private var builtExpo = -1f
 
-    /** Sample the bezier at input x in 0..1. */
+    /**
+     * Sample the bezier at input x in 0..1.
+     *
+     * The control point shares the segment's X coordinate (left Cx=m, right
+     * Cx=m), so the bezier is NOT linear in its own parameter. To read y at a
+     * given *input* x we must invert the bezier X-curve for the parameter t:
+     *   left:  Bx(t) = m(2t - t²) = x  ->  t = 1 - sqrt(1 - x/m)
+     *   right: Bx(t) = m + t²(1-m) = x ->  t = sqrt((x - m)/(1 - m))
+     * With this inversion, at e=0 each control point lands on its endpoint and
+     * the curve collapses to y = x (linear), as documented. Using t = x/m
+     * directly (the previous bug) bowed the curve even at zero expo.
+     */
     private fun sample(x: Float): Float {
         val m = (cfg.thrMidPct / 100f).coerceIn(0.05f, 0.95f)
         val e = (cfg.thrExpoPct / 100f).coerceIn(0f, 1f)
         return if (x <= m) {
-            val t = (x / m).coerceIn(0f, 1f)
+            val u = (x / m).coerceIn(0f, 1f)
+            val t = (1f - sqrt((1f - u).toDouble())).toFloat()
             // P0=(0,0), C=(m, m*(1-2e)), P1=(m,m)
             val cY = m * (1f - 2f * e)
             (1 - t) * (1 - t) * 0f + 2 * (1 - t) * t * cY + t * t * m
         } else {
-            val t = ((x - m) / (1f - m)).coerceIn(0f, 1f)
+            val u = ((x - m) / (1f - m)).coerceIn(0f, 1f)
+            val t = sqrt(u.toDouble()).toFloat()
             // P0=(m,m), C=(m, m+(1-m)*2e), P1=(1,1)
             val cY = m + (1f - m) * 2f * e
             (1 - t) * (1 - t) * m + 2 * (1 - t) * t * cY + t * t * 1f

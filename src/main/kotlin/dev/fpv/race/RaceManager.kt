@@ -48,6 +48,8 @@ object RaceManager {
     private var lastCrossNanos = 0L
 
     private var splitsMs = mutableListOf<Long>()
+    /** Wall-clock split (ms) of the most recent gate crossing; 0 before the next. */
+    private var lastSplitMs = 0L
 
     // transient flash
     private var flashText = ""
@@ -96,6 +98,8 @@ object RaceManager {
 
     fun bestRoundMs(): Long = track.bestRoundMs
     fun validLapCount(): Int = track.validLapsMs.size
+    /** Split of the last crossed gate (ms); 0 when none / clock not started. */
+    fun lastSplitMs(): Long = lastSplitMs
 
     /** Average of the up-to-3 fastest valid single laps (ms; 0 if none). */
     fun avgBest3LapsMs(): Long {
@@ -189,6 +193,7 @@ object RaceManager {
             lapStartNanos = now
             prevGateNanos = now
             lapsCompleted = 0
+            lastSplitMs = 0L
             splitsMs = MutableList(gates.size) { 0L }
             phase = RacePhase.FLYING
             flashText = "GO! GATE $idx"
@@ -197,23 +202,38 @@ object RaceManager {
             return
         }
 
-        // Record a sector split when enabled.
-        if (race()?.sectorsEnabled == true) {
-            splitsMs[idx] = (now - prevGateNanos) / 1_000_000L
-        }
+        // Sector split: time since the previous gate crossing.
+        val splitMs = (now - prevGateNanos) / 1_000_000L
         prevGateNanos = now
+        lastSplitMs = splitMs
+        if (race()?.sectorsEnabled == true && idx in splitsMs.indices) {
+            splitsMs[idx] = splitMs
+        }
 
         if (idx == tg) {
             // Completed one full lap.
             val lapMs = (now - lapStartNanos) / 1_000_000L
+            val prevBestLap = track.validLapsMs.minOrNull() ?: Long.MAX_VALUE
             lapStartNanos = now
             track.validLapsMs.add(lapMs)
             lapsCompleted++
+            // Best-lap ghost: snapshot ONLY this lap's recording (t is measured
+            // per-lap from lapStartNanos, so the samples are monotonic and replay
+            // lines up with the live lap clock).
+            if (recording.isNotEmpty() && lapMs < prevBestLap) {
+                track.ghost = recording.toMutableList()
+                TrackStore.save(track)
+            }
+            recording.clear()
             flashText = "LAP $lapsCompleted/${requiredLaps()}  ${fmt(lapMs)}"
             flashUntil = System.currentTimeMillis() + 1500L
             if (lapsCompleted >= requiredLaps()) {
                 completeRound(now)
             }
+        } else {
+            // Ordinary gate: flash gate number + split.
+            flashText = "GATE $idx  +${fmt(splitMs)}"
+            flashUntil = System.currentTimeMillis() + 900L
         }
         expectedIdx = (idx + 1) % gates.size
     }
@@ -223,7 +243,7 @@ object RaceManager {
         resultMs = flightMs + penaltyMs
         if (track.bestRoundMs == 0L || resultMs < track.bestRoundMs) {
             track.bestRoundMs = resultMs
-            track.ghost = recording.toMutableList()
+            // Best-lap ghost is already snapshotted per lap in onGateCrossed.
             TrackStore.save(track)
         }
         phase = if (race()?.requireLandingZone == true) RacePhase.PROVISIONAL else RacePhase.FINISHED
@@ -295,6 +315,7 @@ object RaceManager {
         lastCrossGate = -1
         recording.clear()
         splitsMs = MutableList(track.gates.size) { 0L }
+        lastSplitMs = 0L
         flashText = ""; flashUntil = 0L
         bannerText = ""; bannerUntil = 0L
         ghostPos = null
@@ -358,8 +379,10 @@ object RaceManager {
         ctx.drawString(font, "F9U RACE", px, py, 0xFFFFFFFF.toInt(), true); py += 11
         ctx.drawString(font, "LAP  $lapsCompleted/${requiredLaps()}", px, py, 0xFF55FF55.toInt(), true); py += 10
         ctx.drawString(font, "TIME ${fmt(elapsedMs())}", px, py, 0xFF55FF55.toInt(), true); py += 10
+        ctx.drawString(font, "CUR  ${fmt(currentLapMs())}", px, py, 0xFFFFFFFF.toInt(), true); py += 10
         ctx.drawString(font, "LEFT ${fmt(remainingTimeMs())}", px, py, 0xFFFFFF55.toInt(), true); py += 10
         ctx.drawString(font, "PEN  +${fmt(penaltyMs())}", px, py, 0xFFFF5555.toInt(), true); py += 10
+        ctx.drawString(font, "SPLIT ${fmt(lastSplitMs())}", px, py, 0xFFAAAAAA.toInt(), true); py += 10
         ctx.drawString(font, "BEST ${fmt(track.bestRoundMs)}", px, py, 0xFFAAAAAA.toInt(), true); py += 10
         ctx.drawString(font, rankingSummary(), px, py, 0xFF55FFFF.toInt(), true)
 
@@ -389,6 +412,9 @@ object RaceManager {
 
     fun deleteTrack(name: String): Boolean = TrackStore.delete(name)
     fun listTracks(): List<String> = TrackStore.listTracks()
+
+    /** Absolute on-disk path of the current track's JSON (share affordance). */
+    fun trackPath(): String = TrackStore.pathOf(track.name).toString()
 
     /** Add a gate at the player's eye, using the chosen F9U template. */
     fun addGateAtEye(mc: Minecraft, template: GateTemplate) {

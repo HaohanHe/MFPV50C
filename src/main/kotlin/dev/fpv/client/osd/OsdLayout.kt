@@ -5,8 +5,9 @@
  * to the screen center (crosshair, artificial horizon, horizon sidebars) ignore
  * their stored x/y and are always drawn centered.
  *
- * A future drag-to-position editor can call [OsdLayout.setPosition] by id; no
- * editor UI ships in this phase.
+ * The live layout lives in [dev.fpv.flight.FpvConfig.osdElements]; this object
+ * only owns the canonical element ids and [defaultLayout] used to seed it and
+ * by the drag editor.
  */
 package dev.fpv.client.osd
 
@@ -47,25 +48,10 @@ object OsdLayout {
         OsdElement(SPEED, true, 8, 8),
         OsdElement(MODE, true, 0, 8, centerAnchored = true),
         OsdElement(TARGET, true, 8, 20),
-        OsdElement(THROTTLE, true, 8, 0), // y anchored near bottom at draw time
+        OsdElement(THROTTLE, true, 8, 68),
         OsdElement(BATTERY, true, 8, 32),
         OsdElement(LQ, true, 8, 44),
         OsdElement(FLIGHT_TIMER, true, 8, 56),
         OsdElement(CENTER_WARNING, true, 0, 0, centerAnchored = true),
     )
-
-    val elements: MutableList<OsdElement> = defaultLayout()
-
-    fun byId(id: String): OsdElement? = elements.firstOrNull { it.id == id }
-
-    fun enabled(id: String): Boolean = byId(id)?.enabled == true
-
-    /** Move an element by id (reserved for the future drag editor). No-op for
-     *  center-anchored elements. */
-    fun setPosition(id: String, x: Int, y: Int) {
-        val e = byId(id) ?: return
-        if (e.centerAnchored) return
-        e.x = x
-        e.y = y
-    }
 }

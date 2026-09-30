@@ -11,6 +11,8 @@ package dev.fpv.client.gui
 
 import dev.fpv.client.FpvClient
 import dev.fpv.flight.FlightMode
+import dev.fpv.flight.FlightFunction
+import dev.fpv.flight.ModeBinding
 import dev.fpv.flight.TuningPreset
 import dev.fpv.flight.FpvConfig
 import dev.fpv.input.AxisLearner
@@ -63,6 +65,10 @@ class FpvConfigScreen(private val parent: Screen?) :
         }
         if (page == 2) {
             buildAirframePage()
+            return
+        }
+        if (page == 3) {
+            buildModesPage()
             return
         }
         val w = width
@@ -365,6 +371,14 @@ class FpvConfigScreen(private val parent: Screen?) :
                 init()
             }.bounds(rightX, y, colW, 18).build()
         )
+        // Modes routing page nav.
+        addRenderableWidget(
+            Button.builder(Component.translatable("gui.fpv.modes")) {
+                page = 3
+                clearWidgets()
+                init()
+            }.bounds(leftX, y, colW, 18).build()
+        )
         y += rowH
 
         addRenderableWidget(
@@ -506,6 +520,166 @@ class FpvConfigScreen(private val parent: Screen?) :
             Button.builder(Component.translatable("gui.fpv.done")) { onClose() }
                 .bounds(width - 100, height - 26, 90, 18).build()
         )
+    }
+
+    // ---- Modes (data-driven channel -> function routing) page ----
+    private var modesNoProfile = false
+
+    private fun buildModesPage() {
+        val profile = cfg.activeProfile()
+        modesNoProfile = profile == null
+        if (profile == null) {
+            addRenderableWidget(
+                Button.builder(Component.translatable("gui.fpv.back")) {
+                    page = 1; clearWidgets(); init()
+                }.bounds(12, height - 26, 120, 18).build()
+            )
+            addRenderableWidget(
+                Button.builder(Component.translatable("gui.fpv.done")) { onClose() }
+                    .bounds(width - 100, height - 26, 90, 18).build()
+            )
+            return
+        }
+        val list = profile.modes
+        val frame = FpvClient.input.lastFrame()
+        val auxNames = cfg.auxChannels.map { it.name }
+
+        addRenderableWidget(
+            Button.builder(Component.translatable("gui.fpv.mode_add")) {
+                list += ModeBinding(); refreshModesPage()
+            }.bounds(width - 150, 24, 138, 18).build()
+        )
+
+        var y = 48
+        val cardH = 42
+        for ((i, b) in list.withIndex()) {
+            if (y + cardH > height - 30) break
+            // Line 1: function | source kind | source | delete.
+            addRenderableWidget(
+                Button.builder(Component.literal(b.function)) {
+                    cycleFunction(b); refreshModesPage()
+                }.bounds(12, y, 74, 18).build()
+            )
+            addRenderableWidget(
+                Button.builder(Component.literal(b.sourceKind)) {
+                    cycleSourceKind(b); refreshModesPage()
+                }.bounds(90, y, 70, 18).build()
+            )
+            addRenderableWidget(
+                Button.builder(Component.literal(sourceLabel(b))) {
+                    cycleSource(b, auxNames, frame); refreshModesPage()
+                }.bounds(164, y, width - 164 - 52, 18).build()
+            )
+            addRenderableWidget(
+                Button.builder(Component.literal("X")) {
+                    list.removeAt(i); refreshModesPage()
+                }.bounds(width - 48, y, 36, 18).build()
+            )
+            // Line 2: active band | negate.
+            addRenderableWidget(
+                Button.builder(Component.literal(bandLabel(b))) {
+                    cycleBand(b); refreshModesPage()
+                }.bounds(12, y + 21, 120, 18).build()
+            )
+            addRenderableWidget(
+                Button.builder(
+                    Component.translatable(
+                        if (b.negated) "gui.fpv.mode_neg" else "gui.fpv.mode_normal"
+                    )
+                ) {
+                    b.negated = !b.negated; refreshModesPage()
+                }.bounds(136, y + 21, 70, 18).build()
+            )
+            y += cardH
+        }
+
+        addRenderableWidget(
+            Button.builder(Component.translatable("gui.fpv.back")) {
+                page = 1; clearWidgets(); init()
+            }.bounds(12, height - 26, 120, 18).build()
+        )
+        addRenderableWidget(
+            Button.builder(Component.translatable("gui.fpv.done")) { onClose() }
+                .bounds(width - 100, height - 26, 90, 18).build()
+        )
+    }
+
+    private fun refreshModesPage() {
+        clearWidgets()
+        init()
+    }
+
+    private fun cycleFunction(b: ModeBinding) {
+        val i = FlightFunction.entries.indexOf(FlightFunction.byId(b.function)).let {
+            if (it < 0) 0 else it
+        }
+        b.function = FlightFunction.entries[(i + 1) % FlightFunction.entries.size].id
+    }
+
+    private fun cycleSourceKind(b: ModeBinding) {
+        val kinds = listOf("AUX", "RAW_AXIS", "BUTTON", "HAT")
+        val i = kinds.indexOf(b.sourceKind).let { if (it < 0) 0 else it }
+        b.sourceKind = kinds[(i + 1) % kinds.size]
+        // Reset the reference to a valid default for the new kind.
+        when (b.sourceKind) {
+            "AUX" -> b.sourceName = cfg.auxChannels.firstOrNull()?.name ?: ""
+            else -> b.sourceIndex = 0
+        }
+        b.hatDirection = 0
+    }
+
+    private fun sourceLabel(b: ModeBinding): String = when (b.sourceKind) {
+        "AUX" -> b.sourceName.ifEmpty { "(none)" }
+        "RAW_AXIS" -> "Axis ${b.sourceIndex + 1}"
+        "BUTTON" -> "Btn ${b.sourceIndex + 1}"
+        "HAT" -> "Hat ${b.sourceIndex + 1}"
+        else -> "?"
+    }
+
+    private fun cycleSource(b: ModeBinding, auxNames: List<String>, frame: StickChannels) {
+        when (b.sourceKind) {
+            "AUX" -> {
+                if (auxNames.isEmpty()) return
+                val i = auxNames.indexOf(b.sourceName).let { if (it < 0) -1 else it }
+                b.sourceName = auxNames[(i + 1) % auxNames.size]
+            }
+            "RAW_AXIS" -> {
+                val n = frame.aux.size
+                if (n == 0) return
+                b.sourceIndex = (b.sourceIndex.coerceAtLeast(0) + 1) % n
+            }
+            "BUTTON" -> {
+                val n = frame.rawButtons.size
+                if (n == 0) return
+                b.sourceIndex = (b.sourceIndex.coerceAtLeast(0) + 1) % n
+            }
+            "HAT" -> {
+                val n = frame.rawHats.size
+                if (n == 0) return
+                b.sourceIndex = (b.sourceIndex.coerceAtLeast(0) + 1) % n
+            }
+        }
+    }
+
+    private data class Band(val label: String, val low: Float, val high: Float)
+
+    private val bands = listOf(
+        Band("FULL", -1f, 1f),
+        Band("HIGH", 0.5f, 1f),
+        Band("MID", -0.5f, 0.5f),
+        Band("LOW", -1f, -0.5f),
+    )
+
+    private fun bandLabel(b: ModeBinding): String {
+        val match = bands.firstOrNull { it.low == b.activeLow && it.high == b.activeHigh }
+        return match?.label ?: "CUSTOM"
+    }
+
+    private fun cycleBand(b: ModeBinding) {
+        val i = bands.indexOfFirst { it.low == b.activeLow && it.high == b.activeHigh }
+            .let { if (it < 0) 0 else it }
+        val next = bands[(i + 1) % bands.size]
+        b.activeLow = next.low; b.activeHigh = next.high
     }
 
     /** pidBehavior cycle: PERFECT (no override) -> known TuningPreset ids. */
@@ -665,9 +839,15 @@ class FpvConfigScreen(private val parent: Screen?) :
         // 1.21.11: renderWithTooltipAndSubtitles already calls renderBackground
         // (blur + darken) before render(); a second call crashes with
         // "Can only blur once per frame".
-        if (page == 1 || page == 2) {
+        if (page == 1 || page == 2 || page == 3) {
             g.drawCenteredString(font, Component.translatable("gui.fpv.config"), width / 2, 6, 0xFFFFFFFF.toInt())
             if (page == 2) drawDerivedPerf(g)
+            if (page == 3 && modesNoProfile) {
+                g.drawCenteredString(
+                    font, Component.translatable("gui.fpv.modes_need_device"),
+                    width / 2, height / 2 - 10, 0xFFFF5555.toInt()
+                )
+            }
             super.render(g, mouseX, mouseY, delta)
             return
         }

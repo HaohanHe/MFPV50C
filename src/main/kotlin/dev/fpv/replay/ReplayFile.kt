@@ -43,20 +43,39 @@ import java.io.DataOutputStream
 import java.nio.file.Files
 import java.nio.file.Path
 
-/** Immutable, already-interpolated pose handed to the camera override + exporter. */
+/**
+ * Mutable pose handed to the camera override + exporter. Mutable on purpose:
+ * ReplayFile.sampleAt() fills the caller-provided instance every frame instead
+ * of allocating a fresh object per interpolation (this is called twice per
+ * rendered frame: once by the CameraMixin path, once by the exporter loop).
+ * Callers must treat the result as valid only until the next sampleAt() call.
+ */
 class ReplaySample(
-    val tSec: Double,
-    val x: Double, val y: Double, val z: Double,
-    val qx: Float, val qy: Float, val qz: Float, val qw: Float,
-    val vx: Float, val vy: Float, val vz: Float,
-    val gx: Float, val gy: Float, val gz: Float,
-    val ax: Float, val ay: Float, val az: Float,
-    val vbat: Float, val mAh: Float, val lq: Float,
-    val rollCmd: Float, val pitchCmd: Float, val yawCmd: Float, val thrCmd: Float,
-    val armed: Boolean,
-    val modeCode: Int,
-    val aux: FloatArray,
+    tSecIn: Double,
+    xIn: Double, yIn: Double, zIn: Double,
+    qxIn: Float, qyIn: Float, qzIn: Float, qwIn: Float,
+    vxIn: Float, vyIn: Float, vzIn: Float,
+    gxIn: Float, gyIn: Float, gzIn: Float,
+    axIn: Float, ayIn: Float, azIn: Float,
+    vbatIn: Float, mAhIn: Float, lqIn: Float,
+    rollCmdIn: Float, pitchCmdIn: Float, yawCmdIn: Float, thrCmdIn: Float,
+    armedIn: Boolean,
+    modeCodeIn: Int,
+    auxIn: FloatArray,
 ) {
+    var tSec: Double = tSecIn
+    var x: Double = xIn; var y: Double = yIn; var z: Double = zIn
+    var qx: Float = qxIn; var qy: Float = qyIn; var qz: Float = qzIn; var qw: Float = qwIn
+    var vx: Float = vxIn; var vy: Float = vyIn; var vz: Float = vzIn
+    var gx: Float = gxIn; var gy: Float = gyIn; var gz: Float = gzIn
+    var ax: Float = axIn; var ay: Float = ayIn; var az: Float = azIn
+    var vbat: Float = vbatIn; var mAh: Float = mAhIn; var lq: Float = lqIn
+    var rollCmd: Float = rollCmdIn; var pitchCmd: Float = pitchCmdIn
+    var yawCmd: Float = yawCmdIn; var thrCmd: Float = thrCmdIn
+    var armed: Boolean = armedIn
+    var modeCode: Int = modeCodeIn
+    var aux: FloatArray = auxIn
+
     fun attitude(out: Quaternionf): Quaternionf = out.set(qx, qy, qz, qw).normalize()
 
     companion object {
@@ -96,14 +115,19 @@ class ReplayFile(
 ) {
     val durationSec: Double get() = if (count == 0) 0.0 else t[count - 1] - t[0]
 
+    // Reused interpolation temporaries (no allocation per sampleAt() call).
+    private val slerpQ0 = Quaternionf()
+    private val slerpQ1 = Quaternionf()
+
     /**
-     * Interpolate a pose at [atSec] (session time). Position/velocity/scalars
-     * linear; attitude quaternion slerped (shortest arc). Clamps outside range.
+     * Interpolate a pose at [atSec] (session time) into [out].
+     * Position/velocity/scalars linear; attitude quaternion slerped (shortest
+     * arc). Clamps outside range. Returns [out] for call chaining.
      */
     fun sampleAt(atSec: Double, out: ReplaySample): ReplaySample {
         if (count == 0) return out
-        if (atSec <= t[0]) return emit(0, out)
-        if (atSec >= t[count - 1]) return emit(count - 1, out)
+        if (atSec <= t[0]) return fillInto(0, 0, 0f, atSec, out)
+        if (atSec >= t[count - 1]) return fillInto(count - 1, count - 1, 0f, atSec, out)
         // Binary search for i with t[i] <= atSec < t[i+1].
         var lo = 0
         var hi = count - 1
@@ -113,40 +137,39 @@ class ReplayFile(
         }
         val span = (t[hi] - t[lo]).coerceAtLeast(1e-9)
         val u = ((atSec - t[lo]) / span).toFloat().coerceIn(0f, 1f)
-        return emitLerp(lo, hi, u, atSec, out)
+        return fillInto(lo, hi, u, atSec, out)
     }
 
-    private fun emit(i: Int, out: ReplaySample): ReplaySample =
-        emitLerp(i, i, 0f, t[i], out)
-
-    private fun emitLerp(
+    private fun fillInto(
         i0: Int, i1: Int, u: Float, atSec: Double, out: ReplaySample,
     ): ReplaySample {
-        val q0 = Quaternionf(qx[i0], qy[i0], qz[i0], qw[i0])
-        val q1 = Quaternionf(qx[i1], qy[i1], qz[i1], qw[i1])
-        // Shortest-arc slerp (JOML slerp already picks the minor arc).
-        val q = q0.slerp(q1, u)
-        fun fl(a: FloatArray, b: FloatArray) = a[i0] + (a[i1] - a[i0]) * u
-        fun db(a: DoubleArray, b: DoubleArray) = a[i0] + (a[i1] - a[i0]) * u
-        val auxOut = if (i0 == i1) aux[i0].copyOf() else {
-            val n = aux[i0].size
-            FloatArray(n) { k -> aux[i0][k] + (aux[i1][k] - aux[i0][k]) * u }
+        slerpQ0.set(qx[i0], qy[i0], qz[i0], qw[i0])
+        val q = if (i0 == i1) slerpQ0.normalize()
+        else slerpQ0.slerp(slerpQ1.set(qx[i1], qy[i1], qz[i1], qw[i1]), u).normalize()
+
+        fun fl(a: FloatArray) = a[i0] + (a[i1] - a[i0]) * u
+        fun db(a: DoubleArray) = a[i0] + (a[i1] - a[i0]) * u
+
+        out.tSec = atSec
+        out.x = db(px); out.y = db(py); out.z = db(pz)
+        out.qx = q.x; out.qy = q.y; out.qz = q.z; out.qw = q.w
+        out.vx = fl(vx); out.vy = fl(vy); out.vz = fl(vz)
+        out.gx = fl(gx); out.gy = fl(gy); out.gz = fl(gz)
+        out.ax = fl(ax); out.ay = fl(ay); out.az = fl(az)
+        out.vbat = fl(vbat); out.mAh = fl(mAh); out.lq = fl(lq)
+        out.rollCmd = fl(rcRoll); out.pitchCmd = fl(rcPitch)
+        out.yawCmd = fl(rcYaw); out.thrCmd = fl(rcThr)
+        out.armed = if (u < 0.5f) armed[i0] else armed[i1]
+        out.modeCode = if (u < 0.5f) modeCode[i0] else modeCode[i1]
+        val dst = out.aux
+        if (i0 == i1) {
+            System.arraycopy(aux[i0], 0, dst, 0, minOf(dst.size, aux[i0].size))
+        } else {
+            val src = aux[i0]
+            val src1 = aux[i1]
+            for (k in 0 until minOf(dst.size, src.size)) dst[k] = src[k] + (src1[k] - src[k]) * u
         }
-        // Reuse the holder object; callers must not retain across frames.
-        return ReplaySample(
-            tSec = atSec,
-            x = db(px, px), y = db(py, py), z = db(pz, pz),
-            qx = q.x, qy = q.y, qz = q.z, qw = q.w,
-            vx = fl(vx, vx), vy = fl(vy, vy), vz = fl(vz, vz),
-            gx = fl(gx, gx), gy = fl(gy, gy), gz = fl(gz, gz),
-            ax = fl(ax, ax), ay = fl(ay, ay), az = fl(az, az),
-            vbat = fl(vbat, vbat), mAh = fl(mAh, mAh), lq = fl(lq, lq),
-            rollCmd = fl(rcRoll, rcRoll), pitchCmd = fl(rcPitch, rcPitch),
-            yawCmd = fl(rcYaw, rcYaw), thrCmd = fl(rcThr, rcThr),
-            armed = if (u < 0.5f) armed[i0] else armed[i1],
-            modeCode = if (u < 0.5f) modeCode[i0] else modeCode[i1],
-            aux = auxOut,
-        ).also { /* out replaced; see note below */ }
+        return out
     }
 
     /** Read a .fpr file. Throws on magic/version mismatch. */

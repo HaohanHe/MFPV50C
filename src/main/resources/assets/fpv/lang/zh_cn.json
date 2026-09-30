@@ -86,6 +86,11 @@
 
   "gui.fpv.race_enabled": "竞速模式（门/计时）：%s",
   "gui.fpv.airframe": "机型物理 >",
+  "gui.fpv.modes": "功能路由(Modes) >",
+  "gui.fpv.mode_add": "+ 添加绑定",
+  "gui.fpv.mode_neg": "取反",
+  "gui.fpv.mode_normal": "正常",
+  "gui.fpv.modes_need_device": "Modes 需要已连接的 USB 设备配置。",
   "gui.fpv.airframe_new": "新建",
   "gui.fpv.airframe_copy": "复制",
   "gui.fpv.airframe_del": "删除",

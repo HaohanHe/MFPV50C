@@ -17,6 +17,11 @@ class ExportScreen(private val parent: Screen?) :
 
     private val cfg get() = dev.fpv.client.FpvClient.config.export ?: ExportConfig()
 
+    /** Tracks the exporting flag across frames so we can rebuild the widget tree
+     *  the moment a run ends (naturally or by cancel) -- otherwise the dialog
+     *  stays stuck on the Cancel button with no way to start another run. */
+    private var wasExporting = false
+
     override fun isPauseScreen(): Boolean = false
 
     override fun init() {
@@ -37,10 +42,19 @@ class ExportScreen(private val parent: Screen?) :
             listOf("mp4", "mkv"), { cfg.container }, { cfg.container = it }); y += 24
 
         val ffmpeg = CinematicExport.detectFfmpeg()
-        val ffmpegLabel = if (ffmpeg != null) "gui.fpv.export.ffmpeg_ok" else "gui.fpv.export.ffmpeg_missing"
+        // Real, clickable status: re-runs the ffmpeg lookup on click and rebuilds
+        // the dialog (so editing ffmpegPath in the config then returning works).
+        // [SUGGESTED LANG KEY: gui.fpv.export.ffmpeg_ok / .ffmpeg_missing]
+        val ffmpegMsg = if (ffmpeg != null) {
+            Component.literal("ffmpeg: ${ffmpeg} (click to rescan)")
+        } else {
+            Component.literal("ffmpeg: NOT FOUND -> PNG frames only (click to rescan)")
+        }
         addRenderableWidget(
-            Button.builder(Component.translatable(ffmpegLabel)) {}
-                .bounds(cx, y, 200, 18).build().apply { active = false }
+            Button.builder(ffmpegMsg) {
+                CinematicExport.detectFfmpeg()
+                rebuildWidgets()
+            }.bounds(cx, y, 200, 18).build()
         )
         y += 22
 
@@ -88,6 +102,14 @@ class ExportScreen(private val parent: Screen?) :
     override fun render(g: GuiGraphics, mouseX: Int, mouseY: Int, delta: Float) {
         // Background already drawn by renderWithTooltipAndSubtitles.
         super.render(g, mouseX, mouseY, delta)
+        // Transition: export just ended (done / cancelled / failed) -> rebuild the
+        // layout so the Start button comes back and progress bar goes away.
+        if (wasExporting && !CinematicExport.exporting) {
+            wasExporting = false
+            rebuildWidgets()
+            return
+        }
+        wasExporting = CinematicExport.exporting
         g.drawCenteredString(font, Component.translatable("screen.fpv.export"), width / 2, 8, 0xFFFFFFFF.toInt())
 
         if (CinematicExport.exporting) {

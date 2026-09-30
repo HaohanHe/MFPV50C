@@ -25,4 +25,10 @@ class DeviceProfile(
 
     /** Raw HID button index used to arm, -1 = arm by axis or by key. */
     var armButton: Int = -1,
+
+    /**
+     * Data-driven channel -> function routing rows (Modes). Empty = fall back to
+     * the legacy single-index arm/mode/headadjust fields.
+     */
+    var modes: MutableList<dev.fpv.flight.ModeBinding> = mutableListOf(),
 )

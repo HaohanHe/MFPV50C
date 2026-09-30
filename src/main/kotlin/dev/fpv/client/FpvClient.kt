@@ -14,9 +14,11 @@ import dev.fpv.replay.ReplayScreen
 import dev.fpv.flight.BatteryModel
 import dev.fpv.flight.Defaults
 import dev.fpv.flight.FlightController
+import dev.fpv.flight.FlightFunction
 import dev.fpv.flight.FpvConfig
 import dev.fpv.flight.LinkMonitor
 import dev.fpv.flight.LinkState
+import dev.fpv.flight.ModesController
 import dev.fpv.flight.TelemetryLogger
 import dev.fpv.flight.TelemetrySample
 import dev.fpv.flight.ThrottleCurve
@@ -67,6 +69,13 @@ object FpvClient : ClientModInitializer {
     val logger = TelemetryLogger()
 
     private val throttleCurve = ThrottleCurve(config)
+
+    /** Data-driven channel -> function (Modes) router. */
+    private val modes = ModesController()
+
+    /** Modes router edge/level bookkeeping. */
+    private var beeperAccSec = 0f
+    private var headfreeWas = false
 
     /** Power-response filter state: effective thrust tracks commanded throttle. */
     private var powerFiltered = 0f
@@ -147,8 +156,8 @@ object FpvClient : ClientModInitializer {
                 if (mc.screen == null) mc.setScreen(ReplayScreen(null))
             }
             FlightRecorder.pollAuxTrigger(input.lastFrame())
-            // Key arming is available only when no arm switch/button is configured.
-            if (config.armSwitchAxis < 0 && config.armButtonIndex < 0) {
+            // Key arming is available only when no arm switch/button/mode binding exists.
+            if (!config.armBindingAutomatic()) {
                 while (armKey.consumeClick()) {
                     armed = !armed
                     playToggle(mc)
@@ -197,13 +206,47 @@ object FpvClient : ClientModInitializer {
         // though the flight itself is paused while a screen is open.
         val channels = input.poll(dt)
 
-        // Arm source (data-driven): a bound HID button takes precedence, then a
-        // bound level-based aux axis; otherwise the keyboard B key toggles.
-        if (config.armButtonIndex >= 0) {
-            val btns = input.buttons()
-            armed = config.armButtonIndex in btns.indices && btns[config.armButtonIndex].toInt() != 0
-        } else if (config.armSwitchAxis >= 0) {
-            armed = channels.aux.getOrElse(config.armSwitchAxis) { 0f } > Defaults.SWITCH_TRIGGER
+        // ---- Data-driven Modes routing ----
+        val bindings = config.activeProfile()?.modes ?: emptyList()
+        val modeRes = modes.evaluate(channels, bindings)
+        if (bindings.isNotEmpty()) {
+            // ARM (PREARM gate applied inside the controller).
+            armed = modeRes.armed
+            // Flight-mode select (ANGLE/HORIZON/ACRO); null = keep current.
+            modeRes.desiredMode?.let { if (flight.ready) flight.requestMode(it) }
+            // HEADFREE level -> drive the runtime head-free flag.
+            if (modeRes.headfree != headfreeWas) {
+                config.headfreeEnabled = modeRes.headfree
+                headfreeWas = modeRes.headfree
+            }
+            // EDGE actions fire once per rising transition.
+            repeat(modeRes.edgeCount(FlightFunction.HEADADJ)) { flight.triggerHeadingAdjust() }
+            repeat(modeRes.edgeCount(FlightFunction.TURTLE)) { flight.turtleRight() }
+            // BEEPER level: repeating audible locate cue.
+            if (modeRes.beeper) {
+                beeperAccSec += dt
+                if (beeperAccSec >= Defaults.BEEPER_INTERVAL_SEC) {
+                    beeperAccSec = 0f
+                    playBeeper(mc)
+                }
+            } else {
+                beeperAccSec = Defaults.BEEPER_INTERVAL_SEC
+            }
+            // Pilot-forced failsafe level: cut the flight (DROP-equivalent).
+            if (modeRes.manualFailsafe) {
+                armed = false
+                flight.disengage()
+            }
+        } else {
+            // Legacy arm sources: a bound HID button, then a level aux axis.
+            if (config.armButtonIndex >= 0) {
+                val btns = input.buttons()
+                armed = config.armButtonIndex in btns.indices &&
+                    btns[config.armButtonIndex].toInt() != 0
+            } else if (config.armSwitchAxis >= 0) {
+                armed = channels.aux.getOrElse(config.armSwitchAxis) { 0f } >
+                    Defaults.SWITCH_TRIGGER
+            }
         }
 
         // ---- Failsafe / battery / telemetry run every frame, even with a GUI
@@ -312,6 +355,13 @@ object FpvClient : ClientModInitializer {
     private fun playToggle(mc: Minecraft) {
         mc.soundManager.play(
             SimpleSoundInstance.forUI(SoundEvents.UI_BUTTON_CLICK, 1.0f)
+        )
+    }
+
+    /** One audible locate-beep cue (repeats while the BEEPER function is active). */
+    private fun playBeeper(mc: Minecraft) {
+        mc.soundManager.play(
+            SimpleSoundInstance.forUI(SoundEvents.UI_BUTTON_CLICK, 1.4f)
         )
     }
 }

@@ -39,6 +39,13 @@ object GateRenderer {
             val camPos = cam.position()
 
             val consumers: MultiBufferSource = ctx.consumers()
+            // [NEEDS LOCAL VERIFICATION] In 1.21.11 mojmap confirm:
+            //  (a) WorldRenderEvents.AfterEntities.context().consumers() returns the
+            //      shared BufferSource that the engine flushes AFTER this callback
+            //      (we must NOT endBatch() ourselves);
+            //  (b) RenderTypes.lines() exists and is the correct immediate line type;
+            //  (c) Gizmos.billboardText(Vec3, TextGizmo.Style) signature + Style builder;
+            //  (d) VertexConsumer.setLineWidth is honoured by the line shader.
             val vc = consumers.getBuffer(RenderTypes.lines())
             val pose: PoseStack.Pose = ctx.matrices().last()
 
@@ -108,14 +115,17 @@ object GateRenderer {
         vc: com.mojang.blaze3d.vertex.VertexConsumer,
         pose: PoseStack.Pose, gate: GateDef, cam: Vec3, color: Int,
     ) {
-        // Avoid-obstacle marker: a horizontal circle (the free-space boundary).
-        val center = gate.center()
+        // Ring gate: a circle lying IN the gate plane (gate.right/gate.up axes),
+        // matching the circular aperture used by GateDef.intersect.
+        val c = gate.center()
         val r = gate.width / 2.0
+        val right = gate.right()
+        val up = gate.up()
         var prev: Vec3? = null
-        val steps = 16
+        val steps = 20
         for (i in 0..steps) {
             val a = 2.0 * Math.PI * i / steps
-            val p = Vec3(center.x + r * cos(a), center.y, center.z + r * sin(a))
+            val p = c.add(right.scale(r * cos(a))).add(up.scale(r * sin(a)))
             if (prev != null) line(vc, pose, prev, p, cam, color)
             prev = p
         }
@@ -142,6 +152,9 @@ object GateRenderer {
     ) {
         val lz = RaceManager.track.landingZone
         val c = lz.center()
+        // The landing zone is an optional marker; only draw it once the user
+        // has placed it (default doc leaves it at origin, which we skip).
+        if (c.x == 0.0 && c.y == 0.0 && c.z == 0.0) return
         val r = lz.radius
         var prev: Vec3? = null
         val steps = 20

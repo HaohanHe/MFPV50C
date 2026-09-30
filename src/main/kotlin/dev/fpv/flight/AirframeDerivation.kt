@@ -46,7 +46,11 @@ object AirframeDerivation {
      */
     const val CT_BASE = 0.028f
 
-    /** Reference drag area Cd*A (m^2) that airDrag=1.0 maps onto. */
+    /**
+     * Reference drag area Cd*A (m^2) that airDrag=1.0 maps onto. Engineering
+     * fit value (typical 5" ~0.015-0.020 m^2), NOT measured; scale by bench
+     * top-speed / decel tuning.
+     */
     const val CD_A_REF = 0.018f
 
     /** Inch -> metre. */

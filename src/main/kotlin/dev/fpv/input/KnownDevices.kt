@@ -70,5 +70,16 @@ object KnownDevices {
             )
         }
         profile.armButton = known.armButton
+
+        // Default Modes routing: SF (a named button-form aux channel) drives ARM.
+        // Users can change/remove this row in the Modes config; it is only a seed.
+        profile.modes.clear()
+        profile.modes += dev.fpv.flight.ModeBinding(
+            function = dev.fpv.flight.FlightFunction.ARM.id,
+            sourceKind = "AUX",
+            sourceName = "SF",
+            activeLow = Defaults.SWITCH_ACTIVE_HIGH_LOW,
+            activeHigh = 1f,
+        )
     }
 }

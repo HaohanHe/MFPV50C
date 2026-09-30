@@ -48,6 +48,8 @@ object FlightRecorder {
     // Previous-sample velocity for the world-frame accel finite difference.
     private var hasPrevVel = false
     private var prevVx = 0f; private var prevVy = 0f; private var prevVz = 0f
+    // Session clock of the last written sample (drives the accel window).
+    private var prevSampleClock = 0.0
 
     private val stampFmt = DateTimeFormatter.ofPattern("yyyyMMdd_HHmmss")
 
@@ -72,6 +74,7 @@ object FlightRecorder {
         recordedSec = 0f
         sampleCount = 0
         hasPrevVel = false
+        prevSampleClock = 0.0
         recording = true
         return true
     }
@@ -122,10 +125,16 @@ object FlightRecorder {
 
         val q: Quaternionf = FpvClient.flight.attitude
         val v = p.deltaMovement
+        // World-frame accel = d(velocity)/d(inter-sample time). In FIXED mode
+        // samples are decimated, so we MUST divide by the real time between the
+        // last written sample and this one (sessionClock delta), NOT by the
+        // render frame dt -- otherwise accel is scaled down by the decimation
+        // factor. In FRAME mode the two are equal.
+        val sampleDt = (sessionClock - prevSampleClock).toFloat()
         val ax: Float; val ay: Float; val az: Float
-        if (hasPrevVel) {
-            // deltaMovement is blocks/tick; convert to blocks/s and difference.
-            val inv = (1f / dt).coerceIn(0f, 240f)
+        if (hasPrevVel && sampleDt > 1e-4f) {
+            // deltaMovement is blocks/tick; convert to blocks/s (*20) then diff.
+            val inv = (1f / sampleDt).coerceIn(0f, 240f)
             ax = ((v.x * 20.0 - prevVx * 20.0) * inv).toFloat()
             ay = ((v.y * 20.0 - prevVy * 20.0) * inv).toFloat()
             az = ((v.z * 20.0 - prevVz * 20.0) * inv).toFloat()
@@ -133,6 +142,7 @@ object FlightRecorder {
             ax = 0f; ay = 0f; az = 0f
         }
         prevVx = v.x.toFloat(); prevVy = v.y.toFloat(); prevVz = v.z.toFloat()
+        prevSampleClock = sessionClock.toDouble()
         hasPrevVel = true
 
         val rec = ReplayFile.Rec()

@@ -26,6 +26,10 @@ data class StickChannels(
     @JvmField var sourceName: String = "",
     /** Richer, data-driven logical AUX list (axis + grouped buttons). */
     @JvmField var auxChannels: List<AuxState> = emptyList(),
+
+    /** Raw HID button/hat snapshots for data-driven mode routing (per-frame). */
+    @JvmField var rawButtons: ByteArray = ByteArray(0),
+    @JvmField var rawHats: ByteArray = ByteArray(0),
 ) {
     companion object {
         /** Logical channel indices. */

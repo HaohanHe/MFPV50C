@@ -8,6 +8,7 @@ package dev.fpv.flight
 
 import kotlin.math.abs
 import kotlin.math.max
+import kotlin.math.sign
 
 object Rates {
 
@@ -30,7 +31,8 @@ object Rates {
 
     /**
      * Legacy Betaflight-compatible rates (rcRate / superRate / expo),
-     * clean-room reimplementation of the published model.
+     * clean-room reimplementation of the published model. This is the
+     * "BETAFLIGHT" branch of the rate-type trio (ACTUAL / BETAFLIGHT / QUICK).
      */
     fun legacy(x: Float, rcRate: Float, superRate: Float, expo: Float): Float {
         var cmd = x
@@ -47,6 +49,28 @@ object Rates {
             angleRate *= superFactor
         }
         return angleRate
+    }
+
+    /**
+     * Quick (RaceFlight-style) rates, clean-room reimplementation of the third
+     * published rate branch (the "QUICK" option alongside ACTUAL and BETAFLIGHT).
+     *
+     * Unlike ACTUAL's quintic center softening, the quick model ramps the base
+     * rate linearly with stick and bows the mid-stick region toward [center]
+     * with a single quadratic (1-|x|) expo term - a more direct, predictable
+     * feel. Sign-preserving, zero at center, reaches [max] at full deflection.
+     *
+     * @param x      stick position -1..1
+     * @param center base rate at a small deflection (deg/s)
+     * @param max    rate at full deflection (deg/s)
+     * @param expo   0..1, softens mid-stick toward center
+     */
+    fun quick(x: Float, center: Float, max: Float, expo: Float): Float {
+        val ax = abs(x)
+        val e = expo.coerceIn(0f, 1f)
+        val mid = ax * (1f - e * (1f - ax))
+        val span = (max - center).coerceAtLeast(0f)
+        return x * center + sign(x) * span * mid
     }
 
     private const val RC_RATE_INCREMENTAL = 14.54f

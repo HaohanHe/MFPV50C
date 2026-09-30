@@ -349,10 +349,18 @@ class OsdEditorScreen(private val parent: Screen?) :
 
     private fun drawAnchored(g: GuiGraphics, e: OsdElement, cx: Int, cy: Int) {
         if (!e.enabled) {
-            // Disabled anchored elements: a dim placeholder so they remain visible.
+            // Disabled anchored elements: a dim placeholder so they remain visible
+            // AND clickable (the selection outline can re-enable them).
             when (e.id) {
                 OsdLayout.MODE -> g.drawCenteredString(font, "FPV ACRO", cx, 8, DISABLED)
                 OsdLayout.CENTER_WARNING -> g.drawCenteredString(font, "(warn)", cx, cy + 14, DISABLED)
+                OsdLayout.CROSSHAIR -> g.fill(cx - 1, cy - 1, cx + 1, cy + 1, DISABLED)
+                OsdLayout.ARTIFICIAL_HORIZON ->
+                    g.fill(cx - 30, cy - 1, cx + 30, cy + 1, DISABLED)
+                OsdLayout.HORIZON_SIDEBARS -> {
+                    g.fill(cx - 36, cy - 3, cx - 30, cy + 3, DISABLED)
+                    g.fill(cx + 30, cy - 3, cx + 36, cy + 3, DISABLED)
+                }
             }
             return
         }

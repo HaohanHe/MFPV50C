@@ -19,6 +19,8 @@ class RaceScreen(private val last: Screen?) : Screen(Component.literal("F9U Race
     private var templateIdx = 0
     private var toast = ""
     private var toastUntil = 0L
+    /** Deferred widget rebuild so dynamic button labels (template/ghost) actually refresh. */
+    private var dirty = false
 
     override fun isPauseScreen(): Boolean = false
 
@@ -59,10 +61,17 @@ class RaceScreen(private val last: Screen?) : Screen(Component.literal("F9U Race
         addBtn(lx, y, 110, 18, "Set Timing Gate") { RaceManager.setTimingGate(selectedGate); toast("timing=$selectedGate"); refresh() }
         addBtn(lx + 114, y, 94, 18, "LandZone@eye") { RaceManager.setLandingZoneAtEye(minecraft); toast("landing set"); refresh() }
         y += 22
-        addBtn(lx, y, 60, 18, "Save") { RaceManager.saveTrackAs(nameBox.value); toast("saved"); refresh() }
-        addBtn(lx + 62, y, 60, 18, "Save As") { RaceManager.saveTrackAs(nameBox.value); toast("saved"); refresh() }
-        addBtn(lx + 124, y, 40, 18, "Load") { if (RaceManager.loadTrack(nameBox.value)) refresh() else toast("not found") }
-        addBtn(lx + 166, y, 40, 18, "Del") { RaceManager.deleteTrack(nameBox.value); refresh() }
+        addBtn(lx, y, 60, 18, "Save") {
+            RaceManager.saveTrackAs(RaceManager.track.name)
+            toast("saved -> ${RaceManager.trackPath()}")
+        }
+        addBtn(lx + 62, y, 60, 18, "Save As") {
+            val ok = RaceManager.saveTrackAs(nameBox.value.trim().ifBlank { "untitled" })
+            nameBox.setValue(RaceManager.track.name)
+            toast(if (ok) "saved -> ${RaceManager.trackPath()}" else "save failed")
+        }
+        addBtn(lx + 124, y, 40, 18, "Load") { if (RaceManager.loadTrack(nameBox.value.trim())) { nameBox.setValue(RaceManager.track.name); toast("loaded"); refresh() } else toast("not found") }
+        addBtn(lx + 166, y, 40, 18, "Del") { RaceManager.deleteTrack(nameBox.value.trim()); toast("deleted") }
 
         // ---- right column: race controls ----
         val rx = width - 150
@@ -87,10 +96,15 @@ class RaceScreen(private val last: Screen?) : Screen(Component.literal("F9U Race
         return b
     }
 
-    private fun toast(msg: String) { toast = msg; toastUntil = System.currentTimeMillis() + 1500L }
-    private fun refresh() { /* next render reads live state; no rebuild needed except name */ }
+    private fun toast(msg: String) { toast = msg; toastUntil = System.currentTimeMillis() + 1800L }
+    /** Mark the widget tree dirty; rebuild happens at the top of the next render
+     *  frame (safe to call from inside a button press). This is what makes the
+     *  "Cycle Tpl", "Ghost ON/OFF" and "START HEAT" labels/activeness refresh. */
+    private fun refresh() { dirty = true }
 
     override fun render(g: GuiGraphics, mouseX: Int, mouseY: Int, delta: Float) {
+        // Rebuild buttons on demand so dynamic labels/activeness refresh.
+        if (dirty) { dirty = false; clearWidgets(); init() }
         // Background already drawn by renderWithTooltipAndSubtitles.
         super.render(g, mouseX, mouseY, delta)
         val font = this.font
@@ -98,10 +112,10 @@ class RaceScreen(private val last: Screen?) : Screen(Component.literal("F9U Race
         g.drawString(font, "F9U RACE EDITOR  (1m ~= 1 block)", 8, y, 0xFFFFFFFF.toInt(), true)
         y += 12
 
-        // Gate list.
+        // Gate list (below the left editor buttons, which end ~y=170).
         val gates = RaceManager.track.gates
-        g.drawString(font, "Gates (${gates.size}): timing=${RaceManager.track.timingGateIndex}", 8, 96, 0xFFAAAAAA.toInt(), true)
-        var gy = 108
+        g.drawString(font, "Gates (${gates.size}): timing=${RaceManager.track.timingGateIndex}", 8, 178, 0xFFAAAAAA.toInt(), true)
+        var gy = 190
         gates.forEachIndexed { i, gt ->
             val sel = if (i == selectedGate) "> " else "  "
             g.drawString(font, "$sel#$i ${gt.gateShape()} ${String.format("%.1fx%.1f", gt.width, gt.height)}", 10, gy,

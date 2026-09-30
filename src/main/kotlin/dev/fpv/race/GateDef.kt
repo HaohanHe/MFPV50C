@@ -102,7 +102,17 @@ data class GateDef(
         val rel = p.subtract(c)
         val alongRight = rel.dot(right())
         val alongUp = rel.dot(up())
-        if (Math.abs(alongRight) > halfW() || Math.abs(alongUp) > halfH()) return null
+        // Shape-aware aperture: RECTANGLE/ARCH must fall inside the open box;
+        // RING must fall inside the circular opening of radius width/2 (thread
+        // the ring). This matches what GateRenderer actually draws.
+        val insideOpening = when (gateShape()) {
+            GateShape.RING -> {
+                val r2 = halfW() * halfW()
+                alongRight * alongRight + alongUp * alongUp <= r2
+            }
+            else -> Math.abs(alongRight) <= halfW() && Math.abs(alongUp) <= halfH()
+        }
+        if (!insideOpening) return null
         return p
     }
 

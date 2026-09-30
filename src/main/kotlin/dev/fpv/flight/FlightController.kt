@@ -70,6 +70,9 @@ class FlightController(val cfg: FpvConfig = FpvConfig()) {
     private val angle = AngleController()
     private var modeSwitchWasHigh = false
 
+    /** True while the data-driven modes router selects the flight mode. */
+    private var modeExternallySelected = false
+
     /** Simulation clock, seconds (drives propwash oscillation phase). */
     private var simTime = 0f
 
@@ -102,12 +105,34 @@ class FlightController(val cfg: FpvConfig = FpvConfig()) {
 
     fun disengage() {
         ready = false
+        modeExternallySelected = false
     }
 
     /** Failsafe LAND: force self-leveling and re-baseline the level plane. */
     fun forceAngleMode() {
         currentMode = FlightMode.ANGLE
         angle.rebaseline(attitude)
+    }
+
+    /**
+     * Apply a flight mode requested by the data-driven modes router. Changing
+     * mode re-baselines the self-level plane (no attitude jump) and resets the
+     * PID/crash state, mirroring the legacy AUX mode-cycle behavior.
+     */
+    fun requestMode(mode: FlightMode) {
+        modeExternallySelected = true
+        if (mode == currentMode) return
+        currentMode = mode
+        angle.rebaseline(attitude)
+        pidLoop.reset()
+        crash.reset()
+    }
+
+    /** Re-latch the head-free reference heading to the current yaw (Modes HEADADJ). */
+    fun triggerHeadingAdjust() {
+        if (!ready) return
+        headfree.lock(currentYawDeg())
+        headfreeActive = true
     }
 
     /**
@@ -228,11 +253,15 @@ class FlightController(val cfg: FpvConfig = FpvConfig()) {
      */
     private fun integrate(cmd: FloatArray, dt: Float, throttleCmd: Float) {
         // Attitude relative to level: [rollDeg positive=banked right,
-        // pitchDeg positive=nose down] - feeds the crash detector.
+        // pitchDeg positive=nose down] - feeds the crash detector. NOTE this is
+        // the body/error convention (positive = banked right), opposite to the
+        // on-screen horizon rotation (FpvOsd); do not unify them.
         val inv = Quaternionf(attitude).conjugate()
         val bodyUp = Vector3f(0f, 1f, 0f).rotate(inv)
         val bodyFwd = Vector3f(0f, 0f, -1f).rotate(inv)
-        val rollLevelDeg = Math.toDegrees(atan2(bodyUp.x, bodyUp.y).toDouble()).toFloat()
+        // A right bank tilts the world-up reference to body -X, so negate to
+        // keep positive=right (verified: crash-recovery correction then opposes).
+        val rollLevelDeg = Math.toDegrees(atan2(-bodyUp.x, bodyUp.y).toDouble()).toFloat()
         val pitchLevelDeg = Math.toDegrees(asin((-bodyFwd.y).coerceIn(-1f, 1f)).toDouble()).toFloat()
         val levelAtt = floatArrayOf(rollLevelDeg, pitchLevelDeg, 0f)
 
@@ -323,6 +352,8 @@ class FlightController(val cfg: FpvConfig = FpvConfig()) {
      * re-baselines the self-level plane (no attitude jump).
      */
     private fun handleModeSwitch(ch: StickChannels) {
+        // The data-driven modes router owns mode selection; don't reset it.
+        if (modeExternallySelected) return
         val idx = cfg.modeSwitchAxis
         if (idx < 0) {
             currentMode = cfg.flightMode

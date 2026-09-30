@@ -368,6 +368,17 @@ class FpvConfig {
             KnownDevices.match(deviceName)?.let { KnownDevices.apply(p, it) }
             profiles.add(p)
         }
+        // Backward compatibility: an older profile that armed via a raw button
+        // but predates the modes table gets the equivalent ARM routing row.
+        if (p.modes.isEmpty() && p.armButton >= 0) {
+            p.modes += ModeBinding(
+                function = FlightFunction.ARM.id,
+                sourceKind = "BUTTON",
+                sourceIndex = p.armButton,
+                activeLow = Defaults.SWITCH_ACTIVE_HIGH_LOW,
+                activeHigh = 1f,
+            )
+        }
         activeProfileFingerprint = fingerprint
         slotCalib = p.gimbal
         auxChannels = p.aux
@@ -379,6 +390,18 @@ class FpvConfig {
     /** The active device profile, or null when no device is attached. */
     fun activeProfile(): DeviceProfile? =
         profiles.firstOrNull { it.fingerprint == activeProfileFingerprint }
+
+    /**
+     * True when arm state is driven automatically (a modes-table ARM binding, a
+     * raw arm button, or a raw arm axis). When false the keyboard arm key
+     * toggles arm state.
+     */
+    fun armBindingAutomatic(): Boolean {
+        val byModes = activeProfile()?.modes?.any {
+            it.function == FlightFunction.ARM.id
+        } ?: false
+        return byModes || armButtonIndex >= 0 || armSwitchAxis >= 0
+    }
 
     /** True when the current device has no completed move-to-bind yet. */
     fun needsBinding(): Boolean = slotCalib.none { it.learned }

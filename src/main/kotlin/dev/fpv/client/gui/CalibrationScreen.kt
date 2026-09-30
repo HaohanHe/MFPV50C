@@ -9,8 +9,9 @@
 package dev.fpv.client.gui
 
 import dev.fpv.client.FpvClient
+import dev.fpv.input.HandLayout
 import dev.fpv.input.SlotCalib
-import dev.fpv.input.StickSlot
+import dev.fpv.input.StickChannels
 import net.minecraft.client.gui.GuiGraphics
 import net.minecraft.client.gui.components.Button
 import net.minecraft.client.gui.screens.Screen
@@ -24,16 +25,22 @@ class CalibrationScreen(private val parent: Screen?) :
 
     private data class Target(
         val prompt: String,
-        val slot: StickSlot? = null,      // gimbal slot (ANALOG)
-        val auxName: String? = null,      // aux channel name (LS/RS/SA..SH)
+        /** Logical gimbal channel (StickChannels.ROLL/PITCH/YAW/THROTTLE), or -1 for aux. */
+        val channel: Int = -1,
+        /** Aux channel name (LS/RS/SA..SH) when channel == -1. */
+        val auxName: String? = null,
         val kind: TKind,
     )
 
+    // NOTE: the four gimbals are addressed by *logical* channel. The physical
+    // StickSlot they bind to is resolved from the hand mode chosen on the first
+    // screen (HandLayout.slot(handMode, channel)) at accept time, so Mode1..4
+    // really re-targets the bindings instead of always writing Mode-2 slots.
     private val targets = listOf(
-        Target("cal.fpv.roll", slot = StickSlot.RH, kind = TKind.ANALOG),
-        Target("cal.fpv.pitch", slot = StickSlot.RV, kind = TKind.ANALOG),
-        Target("cal.fpv.throttle", slot = StickSlot.LV, kind = TKind.ANALOG),
-        Target("cal.fpv.yaw", slot = StickSlot.LH, kind = TKind.ANALOG),
+        Target("cal.fpv.roll", channel = StickChannels.ROLL, kind = TKind.ANALOG),
+        Target("cal.fpv.pitch", channel = StickChannels.PITCH, kind = TKind.ANALOG),
+        Target("cal.fpv.throttle", channel = StickChannels.THROTTLE, kind = TKind.ANALOG),
+        Target("cal.fpv.yaw", channel = StickChannels.YAW, kind = TKind.ANALOG),
         Target("cal.fpv.ls", auxName = "LS", kind = TKind.ANALOG),
         Target("cal.fpv.rs", auxName = "RS", kind = TKind.ANALOG),
         Target("cal.fpv.sa", auxName = "SA", kind = TKind.SWITCH),
@@ -84,7 +91,7 @@ class CalibrationScreen(private val parent: Screen?) :
                         .bounds(cx - 190, height - 60, 110, 20).build()
                 )
                 addRenderableWidget(
-                    Button.builder(Component.translatable("gui.fpv.skip")) { nextTarget() }
+                    Button.builder(Component.translatable("gui.fpv.skip")) { skipTarget() }
                         .bounds(cx - 60, height - 60, 120, 20).build()
                 )
                 addRenderableWidget(
@@ -109,6 +116,9 @@ class CalibrationScreen(private val parent: Screen?) :
 
     private fun resetTarget() {
         foundKind = -1; foundIdx = -1; positions.clear()
+        // Drop the previous target's baselines so the first frame of the new
+        // target re-seeds cleanly instead of latching a stale delta.
+        prevAxes = FloatArray(0); prevButtons = ByteArray(0); prevHats = ByteArray(0)
     }
 
     private fun nextTarget() {
@@ -119,25 +129,54 @@ class CalibrationScreen(private val parent: Screen?) :
 
     private fun acceptTarget() {
         val t = targets[tIdx]
-        if (foundKind >= 0 && foundIdx >= 0) {
-            val sc = SlotCalib(
-                type = when (foundKind) { 1 -> "BUTTON"; 2 -> "HAT"; else -> "AXIS" },
-                axisIndex = foundIdx,
-                reversed = false,
-                rawMin = curMin, rawMid = baseline, rawMax = curMax,
-                positions = ArrayList(positions),
-                learned = true,
-            )
-            if (t.slot != null) cfg.slotCalib[t.slot.ordinal] = sc
-            else if (t.auxName != null) {
+        // Only commit when a source was actually detected AND (for analog) the
+        // pilot swept a real travel; otherwise leave the binding untouched.
+        val detected = foundKind >= 0 && foundIdx >= 0
+        val analogTravel = if (foundKind == 0) (curMax - curMin) else 1f
+        if (detected && (t.kind == TKind.SWITCH || analogTravel >= MIN_ANALOG_TRAVEL)) {
+            // Center = midpoint of the observed travel (self-consistent with the
+            // two-sided normalizer); the latch-time baseline is NOT used as center.
+            val mid = (curMin + curMax) / 2f
+            val type = when (foundKind) { 1 -> "BUTTON"; 2 -> "HAT"; else -> "AXIS" }
+            if (t.channel >= 0) {
+                val slot = HandLayout.slot(cfg.handMode, t.channel)
+                cfg.slotCalib[slot.ordinal] = SlotCalib(
+                    type = type,
+                    axisIndex = foundIdx,
+                    reversed = false,
+                    rawMin = curMin, rawMid = mid, rawMax = curMax,
+                    positions = ArrayList(positions),
+                    learned = true,
+                )
+            } else if (t.auxName != null) {
                 val existing = cfg.auxChannels.firstOrNull { it.name == t.auxName }
                 val ac = existing ?: dev.fpv.input.AuxChannel(name = t.auxName).also { cfg.auxChannels.add(it) }
                 ac.kind = if (foundKind == 0) "AXIS" else "BUTTONS"
                 ac.axisIndex = foundIdx
                 ac.reversed = false
-                ac.rawMin = curMin; ac.rawMid = baseline; ac.rawMax = curMax
+                ac.rawMin = curMin; ac.rawMid = mid; ac.rawMax = curMax
                 ac.positions = ArrayList(positions)
                 ac.learned = true
+            }
+        }
+        nextTarget()
+    }
+
+    /**
+     * Skip explicitly UNBINDS this control (axisIndex = -1, unlearned) so a
+     * skipped or unrecognised gimbal/aux can never leak into flight. The pilot
+     * can re-run the wizard to bind it later.
+     */
+    private fun skipTarget() {
+        val t = targets[tIdx]
+        if (t.channel >= 0) {
+            val slot = HandLayout.slot(cfg.handMode, t.channel)
+            cfg.slotCalib[slot.ordinal] = SlotCalib()
+        } else if (t.auxName != null) {
+            cfg.auxChannels.firstOrNull { it.name == t.auxName }?.let {
+                it.axisIndex = -1
+                it.learned = false
+                it.positions.clear()
             }
         }
         nextTarget()
@@ -225,5 +264,10 @@ class CalibrationScreen(private val parent: Screen?) :
     override fun onClose() {
         cfg.save()
         minecraft.setScreen(parent)
+    }
+
+    companion object {
+        /** Minimum swept raw travel that counts as a real analog calibration. */
+        private const val MIN_ANALOG_TRAVEL = 0.08f
     }
 }

@@ -34,7 +34,20 @@ data class CrashResult(
     /** Recovery holds throttle cut; the integration party should obey. */
     val cutThrottle: Boolean,
 ) {
-    enum class State { NONE, RECOVER }
+    enum class State {
+        /** No tumble detected; sticks free. */
+        NONE,
+
+        /**
+         * A tumble candidate is being watched (thresholds met on at least one
+         * axis) but the persistence window has not elapsed yet. No control is
+         * overridden; the integration party may show a "recover armed" hint.
+         */
+        WATCHING,
+
+        /** Persistence elapsed: actively leveling, throttle held cut. */
+        RECOVER
+    }
 
     companion object {
         val NONE = CrashResult(
@@ -46,6 +59,12 @@ data class CrashResult(
             suggestedPitchRateDps = 0f,
             cutThrottle = false,
         )
+
+        /** Arming window in progress; no override applied. */
+        val WATCHING = NONE.copy(state = State.WATCHING, triggerAxis = -1)
+
+        /** Entered recovery; control uses the per-frame suggested rates below. */
+        val RECOVER = NONE.copy(state = State.RECOVER, cutThrottle = true)
     }
 }
 
@@ -109,8 +128,11 @@ class CrashRecovery {
             if (armedMs >= triggerMs) {
                 recovering = true
                 exitMs = 0f
+                return CrashResult.RECOVER
             }
-            return CrashResult.NONE
+            // Arming window in progress: expose the WATCHING state but override
+            // nothing (zero rates, throttle untouched).
+            return if (armedMs > 0f) CrashResult.WATCHING else CrashResult.NONE
         }
 
         // ── Recovery active: pilot takes over if a stick demands real rate;

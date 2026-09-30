@@ -56,6 +56,15 @@ object Defaults {
     /** Raw aux value above which a switch counts as high. */
     const val SWITCH_TRIGGER = 0.5f
 
+    /** Default active range for a switch engaged in its high position. */
+    const val SWITCH_ACTIVE_HIGH_LOW = 0.5f
+
+    /** Half-width (normalized) of each discrete-switch position band. */
+    const val SWITCH_POSITION_BAND = 0.5f
+
+    /** Interval between repeated locate-beep cues while the BEEPER function is active. */
+    const val BEEPER_INTERVAL_SEC = 0.5f
+
     // ---- Setpoint (RC) smoothing ----
     /** Published setpoint-smoother floor; engineering starting cutoff (Hz). */
     const val SETPOINT_SMOOTHING_ENABLED = true

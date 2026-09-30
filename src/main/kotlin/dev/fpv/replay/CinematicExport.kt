@@ -67,15 +67,26 @@ object CinematicExport {
 
     /** Begin exporting the loaded replay with the current ExportConfig. */
     fun start(): Boolean {
-        val f = ReplayManager.file ?: return false
+        val f = ReplayManager.file ?: run {
+            status = "No replay loaded"
+            return false
+        }
         if (exporting) return false
         val cfg = FpvClient.config.export ?: ExportConfig()
-        val s = Session(f, cfg, detectFfmpeg())
+        val s = try {
+            Session(f, cfg, detectFfmpeg())
+        } catch (e: Throwable) {
+            // e.g. ffmpegPath points at a non-executable / process spawn failure.
+            // Report loudly instead of letting the exception escape into the GUI
+            // button callback and pretending the run started.
+            status = "Export init failed: ${e.javaClass.simpleName}: ${e.message}"
+            return false
+        }
         session = s
         exporting = true
         cancelRequested = false
-        outputPath = null
         totalFrames = s.totalFrames
+        outputPath = s.resolvedOutput
         currentFrame = 0
         status = "Starting export..."
         // Drive the first sub-frame immediately.
@@ -105,10 +116,18 @@ object CinematicExport {
     }
 
     private fun finish(s: Session, error: Boolean = false) {
-        try { s.closeEncoder(error) } catch (_: Exception) {}
+        // closeEncoder returns the ffmpeg process exit code (-1 if we never spawned
+        // one / an exception was already in flight). A nonzero code means the
+        // mp4/mkv is corrupt or missing: surface it instead of printing "Done".
+        val exitCode = try { s.closeEncoder(error) } catch (_: Exception) { -1 }
         exporting = false
         session = null
-        if (!error) status = "Done -> ${outputPath?.fileName ?: "?"}"
+        when {
+            error -> Unit // status already set by the caller
+            exitCode != 0 ->
+                status = "Encode failed (ffmpeg exit $exitCode); see export.log next to the output"
+            else -> status = "Done -> ${outputPath?.fileName ?: "?"}"
+        }
     }
 
     // ---- internal session ------------------------------------------------
@@ -139,6 +158,10 @@ object CinematicExport {
         private var encoderOut: java.io.OutputStream? = null
         private var pngDir: Path? = null
 
+        /** Where the run lands: .mp4/.mkv (ffmpeg) or a PNG frame dir (fallback). */
+        lateinit var resolvedOutput: Path
+            private set
+
         init {
             val baseH = when (cfg.resolution) {
                 "720p" -> 720; "1440p" -> 1440; "2160p" -> 2160
@@ -155,8 +178,12 @@ object CinematicExport {
             canvasW = even(floor(canvasH * targetAspect).toInt())
             pngDir = FabricLoader.getInstance().gameDir
                 .resolve("fpv-replays").resolve("frames_${System.currentTimeMillis()}")
-            if (ffmpeg == null) Files.createDirectories(pngDir)
-            else startEncoder()
+            if (ffmpeg == null) {
+                Files.createDirectories(pngDir)
+                resolvedOutput = pngDir!!
+            } else {
+                startEncoder()
+            }
         }
 
         /** t for output frame [i], sub-sample [s] (180-degree shutter spread). */
@@ -294,16 +321,22 @@ object CinematicExport {
             encoderOut = encoder!!.outputStream
             Thread({
                 encoder!!.inputStream.copyTo(log)
+                log.close()
             }, "fpv-ffmpeg-log").start()
-            outputPath = outPath
+            resolvedOutput = outPath
         }
 
-        fun closeEncoder(error: Boolean) {
+        /** Close stdin, wait for ffmpeg, and return its exit code (0 = clean). */
+        fun closeEncoder(error: Boolean): Int {
             try { encoderOut?.flush() } catch (_: Exception) {}
             try { encoderOut?.close() } catch (_: Exception) {}
-            encoder?.let {
-                try { it.waitFor() } catch (_: Exception) {}
-                if (!it.isAlive) it.destroy()
+            val proc = encoder ?: return 0
+            return try {
+                proc.waitFor()
+                if (!error && CinematicExport.cancelRequested) 0 else proc.exitValue()
+            } catch (_: Exception) {
+                proc.destroy()
+                -1
             }
         }
 
