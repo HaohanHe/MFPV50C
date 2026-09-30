@@ -9,6 +9,7 @@ import com.google.gson.GsonBuilder
 import dev.fpv.client.osd.OsdElement
 import dev.fpv.client.osd.OsdLayout
 import dev.fpv.input.AuxChannel
+import dev.fpv.input.DeviceProfile
 import dev.fpv.input.SlotCalib
 import dev.fpv.input.StickSlot
 import net.fabricmc.loader.api.FabricLoader
@@ -342,6 +343,39 @@ class FpvConfig {
      */
     var auxChannels: MutableList<AuxChannel> = mutableListOf()
 
+    // ---- Per-device control-mapping profiles ----
+    /** All persisted transmitter profiles (one per device fingerprint). */
+    var profiles: MutableList<DeviceProfile> = mutableListOf()
+
+    /** Fingerprint of the currently attached device ("" = not yet attached). */
+    var activeProfileFingerprint: String = ""
+
+    /**
+     * Attach the profile matching [fingerprint], creating one on first sight of
+     * the device, and point the live gimbal/aux/hand-mode lists at it. Call when
+     * the USB radio appears. No raw index is valid across devices, so mappings
+     * never leak between transmitters.
+     */
+    fun attachProfileForDevice(fingerprint: String, deviceName: String): DeviceProfile {
+        var p = profiles.firstOrNull { it.fingerprint == fingerprint }
+        if (p == null) {
+            p = DeviceProfile(fingerprint = fingerprint, modelName = deviceName, handMode = handMode)
+            profiles.add(p)
+        }
+        activeProfileFingerprint = fingerprint
+        slotCalib = p.gimbal
+        auxChannels = p.aux
+        handMode = p.handMode
+        return p
+    }
+
+    /** The active device profile, or null when no device is attached. */
+    fun activeProfile(): DeviceProfile? =
+        profiles.firstOrNull { it.fingerprint == activeProfileFingerprint }
+
+    /** True when the current device has no completed move-to-bind yet. */
+    fun needsBinding(): Boolean = slotCalib.none { it.learned }
+
     // ---- Translational motion multiplayer gating ----
     /** Master enable for client-side thrust/drag translation. */
     var translationEnhance = Defaults.TRANSLATION_ENHANCE
@@ -424,12 +458,14 @@ class FpvConfig {
         if (airframes.isEmpty()) airframes = defaultAirframes()
         if (airframes.none { it.name == activeAirframeName })
             activeAirframeName = airframes.first().name
-        // auxChannels has a non-null initializer; Gson leaves it empty for
-        // older configs that predate the data-driven AUX list.
+        // auxChannels and device profiles have non-null initializers; Gson
+        // leaves them empty for older configs predating the data-driven lists.
     }
 
     // ---- Persistence ----
     fun save() {
+        // Keep the active profile's hand-mode in sync with the live setting.
+        activeProfile()?.handMode = handMode
         Files.createDirectories(configPath().parent)
         Files.writeString(configPath(), gson.toJson(this))
     }

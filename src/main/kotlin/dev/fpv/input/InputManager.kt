@@ -42,4 +42,12 @@ class InputManager(private val cfg: FpvConfig) {
     fun radioAxisCount(): Int = radio.axisCount
 
     fun radioDeviceName(): String = radio.deviceName
+
+    // ---- Raw source access for the wizard / monitor (read-only snapshots). ----
+    fun axes(): FloatArray = radio.lastAxes
+    fun buttons(): ByteArray = radio.lastButtons
+    fun hats(): ByteArray = radio.lastHats
+    fun buttonCount(): Int = radio.buttonCount
+    fun hatCount(): Int = radio.hatCount
+    fun fingerprint(): String = radio.fingerprint
 }

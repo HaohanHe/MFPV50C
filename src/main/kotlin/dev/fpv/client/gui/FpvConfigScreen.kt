@@ -116,6 +116,10 @@ class FpvConfigScreen(private val parent: Screen?) :
             Button.builder(Component.translatable("gui.fpv.guided")) { minecraft.setScreen(CalibrationScreen(this)) }
                 .bounds(192, Y_BTN_A, 80, 18).build()
         )
+        addRenderableWidget(
+            Button.builder(Component.translatable("gui.fpv.monitor")) { minecraft.setScreen(MonitorScreen(this)) }
+                .bounds(276, Y_BTN_A, 80, 18).build()
+        )
 
         deadzoneBtn = Button.builder(Component.literal("")) { cycleDeadzone() }
             .bounds(12, Y_BTN_B, 88, 18).build()

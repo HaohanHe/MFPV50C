@@ -1,63 +1,71 @@
 /*
  * FPV Craft - MIT
- * First-run radio calibration wizard (clean-room). Steps, in order:
- *   0. control mode (hand layout) picker
- *   1. center the sticks: sample raw centers and center jitter
- *   2. move each channel's stick: auto-detect the single moved axis, bind it
- *      to the channel's physical slot, and record raw min/max
- *   3. write per-slot calibration back to config and save
- *
- * Bindings are stored per physical StickSlot, so they survive hand-mode
- * changes and no axis order is ever assumed.
+ * Guided, move-to-bind radio setup (clean-room). For every control the pilot
+ * moves/holds the real control; the wizard watches ALL raw axes/buttons/hats
+ * over a short window and binds whichever source changed the most. No axis,
+ * button or channel order is assumed. Unused controls are skipped and output
+ * neutral (0).
  */
 package dev.fpv.client.gui
 
 import dev.fpv.client.FpvClient
-import dev.fpv.flight.Defaults
-import dev.fpv.input.AxisLearner
-import dev.fpv.input.HandLayout
-import dev.fpv.input.StickChannels
+import dev.fpv.input.SlotCalib
 import dev.fpv.input.StickSlot
 import net.minecraft.client.gui.GuiGraphics
 import net.minecraft.client.gui.components.Button
 import net.minecraft.client.gui.screens.Screen
 import net.minecraft.network.chat.Component
 import kotlin.math.abs
-import kotlin.math.max
 
 class CalibrationScreen(private val parent: Screen?) :
     Screen(Component.translatable("screen.fpv.calibrate")) {
 
-    private var step = 0
+    private enum class TKind { ANALOG, SWITCH }
 
-    /** Channels requested in order, with their prompt keys. */
-    private val targets = listOf(
-        StickChannels.THROTTLE to "cal.fpv.throttle",
-        StickChannels.ROLL to "cal.fpv.roll",
-        StickChannels.PITCH to "cal.fpv.pitch",
-        StickChannels.YAW to "cal.fpv.yaw",
+    private data class Target(
+        val prompt: String,
+        val slot: StickSlot? = null,      // gimbal slot (ANALOG)
+        val auxName: String? = null,      // aux channel name (LS/RS/SA..SH)
+        val kind: TKind,
     )
-    private var targetStep = 0
 
-    // Per raw-axis center sampling.
-    private var center = FloatArray(0)
-    private var centerSum = FloatArray(0)
-    private var centerCount = 0
-    private var centerJitter = FloatArray(0)
+    private val targets = listOf(
+        Target("cal.fpv.roll", slot = StickSlot.RH, kind = TKind.ANALOG),
+        Target("cal.fpv.pitch", slot = StickSlot.RV, kind = TKind.ANALOG),
+        Target("cal.fpv.throttle", slot = StickSlot.LV, kind = TKind.ANALOG),
+        Target("cal.fpv.yaw", slot = StickSlot.LH, kind = TKind.ANALOG),
+        Target("cal.fpv.ls", auxName = "LS", kind = TKind.ANALOG),
+        Target("cal.fpv.rs", auxName = "RS", kind = TKind.ANALOG),
+        Target("cal.fpv.sa", auxName = "SA", kind = TKind.SWITCH),
+        Target("cal.fpv.sb", auxName = "SB", kind = TKind.SWITCH),
+        Target("cal.fpv.sc", auxName = "SC", kind = TKind.SWITCH),
+        Target("cal.fpv.sd", auxName = "SD", kind = TKind.SWITCH),
+        Target("cal.fpv.se", auxName = "SE", kind = TKind.SWITCH),
+        Target("cal.fpv.sf", auxName = "SF", kind = TKind.SWITCH),
+        Target("cal.fpv.sg", auxName = "SG", kind = TKind.SWITCH),
+        Target("cal.fpv.sh", auxName = "SH", kind = TKind.SWITCH),
+    )
 
-    /** Raw axis detected for each target, -1 = not yet. */
-    private val boundAxis = IntArray(targets.size) { -1 }
+    private var phase = 0          // 0=hand, 1=bind, 2=done
+    private var tIdx = 0
 
-    // Per raw-axis extrema while moving.
-    private var minRaw = FloatArray(0)
-    private var maxRaw = FloatArray(0)
+    // Detection state for the current target.
+    private var prevAxes = FloatArray(0)
+    private var prevButtons = ByteArray(0)
+    private var prevHats = ByteArray(0)
+    private var foundKind = -1      // 0 axis, 1 button, 2 hat
+    private var foundIdx = -1
+    private var baseline = 0f
+    private var curMin = 0f
+    private var curMax = 0f
+    private var positions = ArrayList<Float>()
 
     private val cfg get() = FpvClient.config
 
     override fun init() {
         clearWidgets()
         val cx = width / 2
-        when (step) {
+        when (phase) {
             0 -> {
                 addRenderableWidget(
                     Button.builder(Component.translatable("gui.fpv.hand", cfg.handMode)) {
@@ -66,26 +74,27 @@ class CalibrationScreen(private val parent: Screen?) :
                 )
                 addRenderableWidget(
                     Button.builder(Component.translatable("gui.fpv.next")) {
-                        step = 1; rebuild()
+                        phase = 1; tIdx = 0; resetTarget(); rebuild()
                     }.bounds(cx - 60, height / 2 + 70, 120, 20).build()
                 )
             }
             1 -> {
                 addRenderableWidget(
-                    Button.builder(Component.translatable("gui.fpv.ok")) {
-                        captureCenter(); step = 2; targetStep = 0; rebuild()
-                    }.bounds(cx - 60, height - 60, 120, 20).build()
+                    Button.builder(Component.translatable("gui.fpv.retest")) { resetTarget(); rebuild() }
+                        .bounds(cx - 190, height - 60, 110, 20).build()
+                )
+                addRenderableWidget(
+                    Button.builder(Component.translatable("gui.fpv.skip")) { nextTarget() }
+                        .bounds(cx - 60, height - 60, 120, 20).build()
+                )
+                addRenderableWidget(
+                    Button.builder(Component.translatable("gui.fpv.next")) { acceptTarget() }
+                        .bounds(cx + 70, height - 60, 120, 20).build()
                 )
             }
             2 -> {
                 addRenderableWidget(
-                    Button.builder(Component.translatable("gui.fpv.next")) { advanceTarget() }
-                        .bounds(cx - 60, height - 60, 120, 20).build()
-                )
-            }
-            3 -> {
-                addRenderableWidget(
-                    Button.builder(Component.translatable("gui.fpv.finish")) { finish() }
+                    Button.builder(Component.translatable("gui.fpv.finish")) { cfg.save(); onClose() }
                         .bounds(cx - 60, height - 60, 120, 20).build()
                 )
             }
@@ -98,171 +107,123 @@ class CalibrationScreen(private val parent: Screen?) :
 
     private fun rebuild() = init()
 
-    private fun raw(): FloatArray = FpvClient.input.rawAxes()
-
-    private fun captureCenter() {
-        // centerSum/Jitter were accumulated live in render; derive per-axis means.
-        center = if (centerCount > 0 && centerSum.isNotEmpty())
-            FloatArray(centerSum.size) { centerSum[it] / centerCount }
-        else FloatArray(0)
+    private fun resetTarget() {
+        foundKind = -1; foundIdx = -1; positions.clear()
     }
 
-    private fun advanceTarget() {
-        targetStep++
-        if (targetStep >= targets.size) step = 3
+    private fun nextTarget() {
+        tIdx++
+        if (tIdx >= targets.size) phase = 2 else resetTarget()
         rebuild()
     }
 
-    private fun finish() {
-        for ((i, target) in targets.withIndex()) {
-            val axis = boundAxis[i]
-            if (axis < 0) continue
-            val slot = HandLayout.slot(cfg.handMode, target.first)
-            val sc = cfg.slotCalib[slot.ordinal]
-            sc.axisIndex = axis
-            if (axis in minRaw.indices) {
-                sc.rawMin = minRaw[axis]
-                sc.rawMax = maxRaw[axis]
+    private fun acceptTarget() {
+        val t = targets[tIdx]
+        if (foundKind >= 0 && foundIdx >= 0) {
+            val sc = SlotCalib(
+                type = when (foundKind) { 1 -> "BUTTON"; 2 -> "HAT"; else -> "AXIS" },
+                axisIndex = foundIdx,
+                reversed = false,
+                rawMin = curMin, rawMid = baseline, rawMax = curMax,
+                positions = ArrayList(positions),
+                learned = true,
+            )
+            if (t.slot != null) cfg.slotCalib[t.slot.ordinal] = sc
+            else if (t.auxName != null) {
+                val existing = cfg.auxChannels.firstOrNull { it.name == t.auxName }
+                val ac = existing ?: dev.fpv.input.AuxChannel(name = t.auxName).also { cfg.auxChannels.add(it) }
+                ac.kind = if (foundKind == 0) "AXIS" else "BUTTONS"
+                ac.axisIndex = foundIdx
+                ac.reversed = false
+                ac.rawMin = curMin; ac.rawMid = baseline; ac.rawMax = curMax
+                ac.positions = ArrayList(positions)
+                ac.learned = true
             }
-            sc.rawMid = if (axis in center.indices) center[axis] else Defaults.RAW_RANGE_MID
-            val jitter = if (axis in centerJitter.indices) centerJitter[axis] else 0f
-            sc.deadzone = (jitter + Defaults.CALIB_JITTER_MARGIN)
-                .coerceIn(Defaults.CALIB_DEADZONE_MIN, Defaults.CALIB_DEADZONE_MAX)
-            sc.learned = true
         }
-        cfg.save()
-        onClose()
+        nextTarget()
     }
 
     override fun render(g: GuiGraphics, mouseX: Int, mouseY: Int, delta: Float) {
         renderBackground(g, mouseX, mouseY, delta)
-        val r = raw()
+        FpvClient.input.rawAxes() // refresh raw snapshots
         val cx = width / 2
 
-        when (step) {
+        when (phase) {
             0 -> {
                 g.drawCenteredString(font, Component.translatable("cal.fpv.mode_title"), cx, height / 2 - 60, 0xFFFFFF)
-                g.drawCenteredString(font, Component.translatable("cal.fpv.mode_desc"), cx, height / 2 - 35, 0xAAAAAA)
-                g.drawCenteredString(font, Component.translatable("cal.fpv.mode_default"), cx, height / 2 - 15, 0xAAAAAA)
-                drawTxDiagram(g, cx, height / 2 + 10)
+                g.drawCenteredString(font, Component.translatable("cal.fpv.mode_default"), cx, height / 2 - 35, 0xAAAAAA)
             }
             1 -> {
-                g.drawCenteredString(font, Component.translatable("cal.fpv.center_title"), cx, height / 2 - 80, 0xFFFFFF)
-                // Crosses rest at center while sampling (mapping unknown until step 2).
-                drawStaticCross(g, cx - 80, height / 2)
-                drawStaticCross(g, cx + 80, height / 2)
-                sampleCenters(r)
+                val t = targets[tIdx]
+                g.drawCenteredString(font, Component.translatable(t.prompt), cx, height / 2 - 70, 0xFFFFFF)
+                observe(t)
+                val status = when {
+                    foundKind < 0 -> Component.translatable("cal.fpv.move_hint")
+                    t.kind == TKind.SWITCH -> Component.translatable("cal.fpv.levels", positions.size)
+                    else -> Component.translatable("cal.fpv.detected", sourceLabel())
+                }
+                g.drawCenteredString(font, status, cx, height / 2 + 60, 0x55FF55)
             }
             2 -> {
-                val (ch, labelKey) = targets[targetStep]
-                g.drawCenteredString(font, Component.translatable(labelKey), cx, height / 2 - 80, 0xFFFFFF)
-
-                // Detect the single moved axis and bind it to this channel's slot.
-                val exclude = boundAxis.withIndex()
-                    .filter { it.index != targetStep && it.value >= 0 }
-                    .map { it.value }.toSet()
-                val detected = AxisLearner.detect(r, center, exclude)
-                if (detected >= 0) {
-                    boundAxis[targetStep] = detected
-                    val slot = HandLayout.slot(cfg.handMode, ch)
-                    cfg.slotCalib[slot.ordinal].axisIndex = detected
-                    if (minRaw.size != r.size) {
-                        minRaw = FloatArray(r.size) { Float.MAX_VALUE }
-                        maxRaw = FloatArray(r.size) { -Float.MAX_VALUE }
-                    }
-                    for (i in r.indices) {
-                        if (r[i] < minRaw[i]) minRaw[i] = r[i]
-                        if (r[i] > maxRaw[i]) maxRaw[i] = r[i]
-                    }
-                }
-
-                // Crosshairs driven by live slot bindings.
-                drawSlotCross(g, cx - 80, height / 2, r, StickSlot.LH, StickSlot.LV)
-                drawSlotCross(g, cx + 80, height / 2, r, StickSlot.RH, StickSlot.RV)
-
-                val bound = boundAxis[targetStep]
-                if (bound >= 0)
-                    g.drawCenteredString(
-                        font, Component.translatable("cal.fpv.detected", bound + 1),
-                        cx, height / 2 + 80, 0x55FF55,
-                    )
-                else
-                    g.drawCenteredString(
-                        font, Component.translatable("cal.fpv.move_hint"),
-                        cx, height / 2 + 80, 0xFFFF55,
-                    )
-            }
-            3 -> {
                 g.drawCenteredString(font, Component.translatable("cal.fpv.done_title"), cx, height / 2 - 40, 0x55FF55)
-                for ((i, pair) in targets.withIndex()) {
-                    val a = boundAxis[i]
-                    val label = Component.translatable(pair.second)
-                    val txt = if (a >= 0)
-                        Component.translatable("cal.fpv.summary_row", label, a + 1)
-                    else
-                        Component.translatable("cal.fpv.summary_skip", label)
-                    g.drawCenteredString(font, txt, cx, height / 2 - 10 + i * 16, 0xAAAAAA)
-                }
+                g.drawCenteredString(font, Component.translatable("cal.fpv.done_desc"), cx, height / 2 - 10, 0xAAAAAA)
             }
         }
-
         super.render(g, mouseX, mouseY, delta)
     }
 
-    /** Live center sampling for every raw axis. */
-    private fun sampleCenters(r: FloatArray) {
-        if (r.isEmpty()) return
-        if (centerSum.size != r.size) {
-            centerSum = FloatArray(r.size)
-            centerJitter = FloatArray(r.size)
-            centerCount = 0
+    private fun sourceLabel(): String = when (foundKind) {
+        0 -> "Axis ${foundIdx + 1}"
+        1 -> "Button ${foundIdx + 1}"
+        else -> "Hat ${foundIdx + 1}"
+    }
+
+    /** Watch raw sources and bind whichever moved most; track extrema/levels. */
+    private fun observe(t: Target) {
+        val ax = FpvClient.input.axes()
+        val bt = FpvClient.input.buttons()
+        val ht = FpvClient.input.hats()
+
+        // First frame: seed baselines.
+        if (prevAxes.isEmpty() && ax.isNotEmpty()) { prevAxes = ax.copyOf(); prevButtons = bt.copyOf(); prevHats = ht.copyOf() }
+
+        var best = 0f; var bk = -1; var bi = -1
+        for (i in ax.indices) {
+            val d = abs(ax[i] - prevAxes[i])
+            if (d > best) { best = d; bk = 0; bi = i }
         }
-        for (i in r.indices) {
-            centerSum[i] += r[i]
-            val n = centerCount + 1
-            val mean = (centerSum[i]) / n
-            centerJitter[i] = max(centerJitter[i], abs(r[i] - mean))
+        for (i in bt.indices) {
+            if (bt[i] != prevButtons[i]) { best = 1f; bk = 1; bi = i }
         }
-        centerCount++
+        for (i in ht.indices) {
+            if (ht[i] != prevHats[i]) { best = 1f; bk = 2; bi = i }
+        }
+        prevAxes = ax.copyOf(); prevButtons = bt.copyOf(); prevHats = ht.copyOf()
+
+        if (bk < 0 || best < 0.15f) return
+        // Latch the first source that moves enough, then keep sampling it.
+        if (foundKind < 0) { foundKind = bk; foundIdx = bi; baseline = currentRaw(); curMin = baseline; curMax = baseline }
+
+        if (bk == foundKind && bi == foundIdx) {
+            val v = currentRaw()
+            if (t.kind == TKind.SWITCH) {
+                val level = if (foundKind == 0) v else v.toInt().toFloat()
+                if (positions.none { abs(it - level) < 0.05f }) positions.add(level)
+            } else {
+                if (v < curMin) curMin = v
+                if (v > curMax) curMax = v
+            }
+        }
     }
 
-    /** Transmitter diagram: two gimbals with colored channel labels. */
-    private fun drawTxDiagram(g: GuiGraphics, cx: Int, cy: Int) {
-        g.fill(cx - 30, cy - 30, cx + 30, cy + 30, 0xFF333333.toInt())
-        g.fill(cx - 19, cy - 18, cx - 17, cy + 18, 0xFFFFFFFF.toInt())
-        g.fill(cx - 30, cy - 1, cx - 6, cy + 1, 0xFFFFFFFF.toInt())
-        g.fill(cx + 17, cy - 18, cx + 19, cy + 18, 0xFFFFFFFF.toInt())
-        g.fill(cx + 6, cy - 1, cx + 30, cy + 1, 0xFFFFFFFF.toInt())
-        g.drawString(font, "THR", cx - 52, cy - 24, 0xFFFF5555.toInt())
-        g.drawString(font, "YAW", cx - 58, cy + 22, 0xFFFFAA00.toInt())
-        g.drawString(font, "PIT", cx + 26, cy - 24, 0xFF55AAAA.toInt())
-        g.drawString(font, "ROL", cx + 26, cy + 22, 0xFF55FF55.toInt())
-    }
-
-    private fun drawStaticCross(g: GuiGraphics, cx: Int, cy: Int) {
-        val s = 26
-        g.fill(cx - s, cy - 1, cx + s, cy + 1, 0xFFFFFFFF.toInt())
-        g.fill(cx - 1, cy - s, cx + 1, cy + s, 0xFFFFFFFF.toInt())
-        g.fill(cx - 3, cy - 3, cx + 3, cy + 3, 0xFFFFFFFF.toInt())
-    }
-
-    private fun drawSlotCross(
-        g: GuiGraphics, cx: Int, cy: Int, raw: FloatArray,
-        hSlot: StickSlot, vSlot: StickSlot,
-    ) {
-        val s = 26
-        g.fill(cx - s, cy - 1, cx + s, cy + 1, 0xFFFFFFFF.toInt())
-        g.fill(cx - 1, cy - s, cx + 1, cy + s, 0xFFFFFFFF.toInt())
-        val hc = cfg.slotCalib[hSlot.ordinal]
-        val vc = cfg.slotCalib[vSlot.ordinal]
-        val hx = if (hc.axisIndex in raw.indices) raw[hc.axisIndex] else 0f
-        val vy = if (vc.axisIndex in raw.indices) raw[vc.axisIndex] else 0f
-        val px = (hx * s).toInt()
-        val py = (-vy * s).toInt()
-        g.fill(cx + px - 3, cy + py - 3, cx + px + 3, cy + py + 3, 0xFFFF5555.toInt())
+    private fun currentRaw(): Float = when (foundKind) {
+        1 -> if (FpvClient.input.buttons().getOrElse(foundIdx) { 0 }.toInt() != 0) 1f else 0f
+        2 -> FpvClient.input.hats().getOrElse(foundIdx) { 0 }.toFloat()
+        else -> FpvClient.input.axes().getOrElse(foundIdx) { 0f }
     }
 
     override fun onClose() {
+        cfg.save()
         minecraft.setScreen(parent)
     }
 }

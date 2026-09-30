@@ -36,6 +36,12 @@ data class AuxChannel(
     /** Center deadband in raw-axis units (AXIS kind). */
     var deadzone: Float = 0.02f,
 
+    /**
+     * Observed raw value of each switch position (AXIS-as-switch or HAT kind).
+     * Empty = continuous. For BUTTONS kind use [buttons] instead.
+     */
+    var positions: MutableList<Float> = mutableListOf(),
+
     /** True once the measured endpoints come from real samples. */
     var learned: Boolean = false,
 ) {

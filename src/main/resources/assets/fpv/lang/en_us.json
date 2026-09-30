@@ -9,6 +9,7 @@
 
   "screen.fpv.config": "FPV Settings",
   "screen.fpv.calibrate": "Radio Calibration",
+  "screen.fpv.monitor": "Channel Monitor",
 
   "channel.fpv.throttle": "Throttle",
   "channel.fpv.roll": "Roll",
@@ -140,6 +141,28 @@
   "cal.fpv.done_title": "Calibration complete",
   "cal.fpv.summary_row": "%s -> Axis %s",
   "cal.fpv.summary_skip": "%s -> skipped (not bound)",
+
+  "gui.fpv.monitor": "Monitor",
+  "gui.fpv.retest": "Re-test",
+  "gui.fpv.skip": "Skip (unused)",
+  "cal.fpv.ls": "Move the LEFT slider (LS)",
+  "cal.fpv.rs": "Move the RIGHT slider (RS)",
+  "cal.fpv.sa": "Toggle switch SA through ALL positions",
+  "cal.fpv.sb": "Toggle switch SB through ALL positions",
+  "cal.fpv.sc": "Toggle switch SC through ALL positions",
+  "cal.fpv.sd": "Toggle switch SD through ALL positions",
+  "cal.fpv.se": "Toggle switch SE through ALL positions",
+  "cal.fpv.sf": "Toggle switch SF through ALL positions",
+  "cal.fpv.sg": "Toggle switch SG through ALL positions",
+  "cal.fpv.sh": "Toggle switch SH through ALL positions",
+  "cal.fpv.detected": "Detected: %s",
+  "cal.fpv.levels": "Distinct levels seen: %s (toggle every position)",
+  "cal.fpv.done_desc": "Unused controls output neutral (0). Saved to this device.",
+
+  "mon.fpv.device": "Device: %s",
+  "mon.fpv.axes": "Axes (%s)",
+  "mon.fpv.buttons": "Buttons (%s)",
+  "mon.fpv.hats": "Hats (%s)",
 
   "screen.fpv.race": "F9U Race",
   "race.fpv.start_heat": "START HEAT",

@@ -9,6 +9,7 @@
 
   "screen.fpv.config": "FPV 设置",
   "screen.fpv.calibrate": "遥控器校准",
+  "screen.fpv.monitor": "通道监视器",
 
   "channel.fpv.throttle": "油门",
   "channel.fpv.roll": "横滚",
@@ -140,6 +141,27 @@
   "cal.fpv.done_title": "校准完成",
   "cal.fpv.summary_row": "%s -> 轴 %s",
   "cal.fpv.summary_skip": "%s -> 已跳过（未绑定）",
+
+  "gui.fpv.monitor": "监视器",
+  "gui.fpv.retest": "重测",
+  "gui.fpv.skip": "跳过（未使用）",
+  "cal.fpv.ls": "请推动左滑杆（LS）",
+  "cal.fpv.rs": "请推动右滑杆（RS）",
+  "cal.fpv.sa": "请把开关 SA 拨到每一档",
+  "cal.fpv.sb": "请把开关 SB 拨到每一档",
+  "cal.fpv.sc": "请把开关 SC 拨到每一档",
+  "cal.fpv.sd": "请把开关 SD 拨到每一档",
+  "cal.fpv.se": "请把开关 SE 拨到每一档",
+  "cal.fpv.sf": "请把开关 SF 拨到每一档",
+  "cal.fpv.sg": "请把开关 SG 拨到每一档",
+  "cal.fpv.sh": "请把开关 SH 拨到每一档",
+  "cal.fpv.levels": "已识别档位：%s（请拨完每一档）",
+  "cal.fpv.done_desc": "未使用的控件输出中性（0），已按本设备保存。",
+
+  "mon.fpv.device": "设备：%s",
+  "mon.fpv.axes": "轴（%s）",
+  "mon.fpv.buttons": "按钮（%s）",
+  "mon.fpv.hats": "帽开关（%s）",
 
   "screen.fpv.race": "F9U 竞速",
   "race.fpv.start_heat": "开始比赛",
