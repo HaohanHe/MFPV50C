@@ -355,17 +355,17 @@ object RaceManager {
 
         val px = sw - 120
         var py = 6
-        ctx.drawString(font, "F9U RACE", px, py, 0xFFFFFF, true); py += 11
-        ctx.drawString(font, "LAP  $lapsCompleted/${requiredLaps()}", px, py, 0x55FF55, true); py += 10
-        ctx.drawString(font, "TIME ${fmt(elapsedMs())}", px, py, 0x55FF55, true); py += 10
-        ctx.drawString(font, "LEFT ${fmt(remainingTimeMs())}", px, py, 0xFFFF55, true); py += 10
-        ctx.drawString(font, "PEN  +${fmt(penaltyMs())}", px, py, 0xFF5555, true); py += 10
-        ctx.drawString(font, "BEST ${fmt(track.bestRoundMs)}", px, py, 0xAAAAAA, true); py += 10
-        ctx.drawString(font, rankingSummary(), px, py, 0x55FFFF, true)
+        ctx.drawString(font, "F9U RACE", px, py, 0xFFFFFFFF.toInt(), true); py += 11
+        ctx.drawString(font, "LAP  $lapsCompleted/${requiredLaps()}", px, py, 0xFF55FF55.toInt(), true); py += 10
+        ctx.drawString(font, "TIME ${fmt(elapsedMs())}", px, py, 0xFF55FF55.toInt(), true); py += 10
+        ctx.drawString(font, "LEFT ${fmt(remainingTimeMs())}", px, py, 0xFFFFFF55.toInt(), true); py += 10
+        ctx.drawString(font, "PEN  +${fmt(penaltyMs())}", px, py, 0xFFFF5555.toInt(), true); py += 10
+        ctx.drawString(font, "BEST ${fmt(track.bestRoundMs)}", px, py, 0xFFAAAAAA.toInt(), true); py += 10
+        ctx.drawString(font, rankingSummary(), px, py, 0xFF55FFFF.toInt(), true)
 
         // Flash above the crosshair; banner near the bottom.
-        if (flash().isNotEmpty()) ctx.drawCenteredString(font, flash(), cx, sh / 2 - 34, 0xFFFFFF)
-        if (banner().isNotEmpty()) ctx.drawCenteredString(font, banner(), cx, sh - 40, 0xFFFF55)
+        if (flash().isNotEmpty()) ctx.drawCenteredString(font, flash(), cx, sh / 2 - 34, 0xFFFFFFFF.toInt())
+        if (banner().isNotEmpty()) ctx.drawCenteredString(font, banner(), cx, sh - 40, 0xFFFFFF55.toInt())
     }
 
     // ------------------------------------------------------------------

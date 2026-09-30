@@ -144,29 +144,29 @@ class CalibrationScreen(private val parent: Screen?) :
     }
 
     override fun render(g: GuiGraphics, mouseX: Int, mouseY: Int, delta: Float) {
-        renderBackground(g, mouseX, mouseY, delta)
+        // Background already drawn by renderWithTooltipAndSubtitles (see FpvConfigScreen).
         FpvClient.input.rawAxes() // refresh raw snapshots
         val cx = width / 2
 
         when (phase) {
             0 -> {
-                g.drawCenteredString(font, Component.translatable("cal.fpv.mode_title"), cx, height / 2 - 60, 0xFFFFFF)
-                g.drawCenteredString(font, Component.translatable("cal.fpv.mode_default"), cx, height / 2 - 35, 0xAAAAAA)
+                g.drawCenteredString(font, Component.translatable("cal.fpv.mode_title"), cx, height / 2 - 60, 0xFFFFFFFF.toInt())
+                g.drawCenteredString(font, Component.translatable("cal.fpv.mode_default"), cx, height / 2 - 35, 0xFFAAAAAA.toInt())
             }
             1 -> {
                 val t = targets[tIdx]
-                g.drawCenteredString(font, Component.translatable(t.prompt), cx, height / 2 - 70, 0xFFFFFF)
+                g.drawCenteredString(font, Component.translatable(t.prompt), cx, height / 2 - 70, 0xFFFFFFFF.toInt())
                 observe(t)
                 val status = when {
                     foundKind < 0 -> Component.translatable("cal.fpv.move_hint")
                     t.kind == TKind.SWITCH -> Component.translatable("cal.fpv.levels", positions.size)
                     else -> Component.translatable("cal.fpv.detected", sourceLabel())
                 }
-                g.drawCenteredString(font, status, cx, height / 2 + 60, 0x55FF55)
+                g.drawCenteredString(font, status, cx, height / 2 + 60, 0xFF55FF55.toInt())
             }
             2 -> {
-                g.drawCenteredString(font, Component.translatable("cal.fpv.done_title"), cx, height / 2 - 40, 0x55FF55)
-                g.drawCenteredString(font, Component.translatable("cal.fpv.done_desc"), cx, height / 2 - 10, 0xAAAAAA)
+                g.drawCenteredString(font, Component.translatable("cal.fpv.done_title"), cx, height / 2 - 40, 0xFF55FF55.toInt())
+                g.drawCenteredString(font, Component.translatable("cal.fpv.done_desc"), cx, height / 2 - 10, 0xFFAAAAAA.toInt())
             }
         }
         super.render(g, mouseX, mouseY, delta)

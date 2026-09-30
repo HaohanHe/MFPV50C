@@ -94,14 +94,14 @@ class ReplayScreen(private val parent: Screen?) :
     }
 
     override fun render(g: GuiGraphics, mouseX: Int, mouseY: Int, delta: Float) {
-        renderBackground(g, mouseX, mouseY, delta)
+        // Background already drawn by renderWithTooltipAndSubtitles.
         super.render(g, mouseX, mouseY, delta)
         val font = this.font
-        g.drawString(font, Component.translatable("screen.fpv.replay"), 12, 8, 0xFFFFFF, true)
+        g.drawString(font, Component.translatable("screen.fpv.replay"), 12, 8, 0xFFFFFFFF.toInt(), true)
 
         val f = ReplayManager.file
         if (f == null) {
-            g.drawString(font, Component.translatable("gui.fpv.replay.hint"), 180, 80, 0xAAAAAA, true)
+            g.drawString(font, Component.translatable("gui.fpv.replay.hint"), 180, 80, 0xFFAAAAAA.toInt(), true)
         } else {
             // Timeline rail + fill.
             g.fill(scrubX, scrubY, scrubX + scrubW, scrubY + 4, 0xFF222222.toInt())
@@ -114,19 +114,19 @@ class ReplayScreen(private val parent: Screen?) :
                     "${ReplayManager.formatTime(ReplayManager.cursorSec)} / " +
                         ReplayManager.formatTime(ReplayManager.durationSec)
                 ),
-                scrubX, scrubY + 8, 0x55FF55, true,
+                scrubX, scrubY + 8, 0xFF55FF55.toInt(), true,
             )
             // Speed / view / pause state.
-            g.drawString(font, Component.literal("x${ReplayManager.speed}"), scrubX + 200, scrubY + 8, 0x55FFFF, true)
-            g.drawString(font, Component.literal(ReplayManager.view.name), scrubX + 260, scrubY + 8, 0x55FFFF, true)
+            g.drawString(font, Component.literal("x${ReplayManager.speed}"), scrubX + 200, scrubY + 8, 0xFF55FFFF.toInt(), true)
+            g.drawString(font, Component.literal(ReplayManager.view.name), scrubX + 260, scrubY + 8, 0xFF55FFFF.toInt(), true)
             if (ReplayManager.paused)
-                g.drawCenteredString(font, Component.translatable("gui.fpv.replay.paused"), width / 2, 60, 0xFFFF55)
+                g.drawCenteredString(font, Component.translatable("gui.fpv.replay.paused"), width / 2, 60, 0xFFFFFF55.toInt())
 
-            g.drawString(font, Component.translatable("gui.fpv.replay.limit_note"), 12, height - 44, 0xAAAAAA, true)
+            g.drawString(font, Component.translatable("gui.fpv.replay.limit_note"), 12, height - 44, 0xFFAAAAAA.toInt(), true)
         }
 
         if (System.currentTimeMillis() < toastUntil)
-            g.drawCenteredString(font, toast, width / 2, height - 12, 0xFFFFFF)
+            g.drawCenteredString(font, toast, width / 2, height - 12, 0xFFFFFFFF.toInt())
     }
 
     override fun onClose() {

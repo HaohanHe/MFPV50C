@@ -19,14 +19,14 @@ import kotlin.math.atan2
 
 object FpvOsd {
 
-    private const val GREEN = 0x55FF55
+    private const val GREEN = 0xFF55FF55.toInt()
     private const val GREEN_FILL = 0xFF55FF55.toInt()
-    private const val YELLOW = 0xFFFF55
+    private const val YELLOW = 0xFFFFFF55.toInt()
     private const val YELLOW_FILL = 0xFFFFFF55.toInt()
-    private const val RED = 0xFF5555
+    private const val RED = 0xFFFF5555.toInt()
     private const val RED_FILL = 0xFFFF5555.toInt()
-    private const val CYAN = 0x55FFFF
-    private const val GRAY = 0xAAAAAA
+    private const val CYAN = 0xFF55FFFF.toInt()
+    private const val GRAY = 0xFFAAAAAA.toInt()
 
     fun draw(ctx: GuiGraphics) {
         val mc = Minecraft.getInstance()
@@ -58,7 +58,7 @@ object FpvOsd {
                 font,
                 "REPLAY x${String.format("%.2f", rm.speed)} ${rm.view}  " +
                     rm.formatTime(rm.cursorSec),
-                sw - 150, 4, 0xFFFF55, true,
+                sw - 150, 4, 0xFFFFFF55.toInt(), true,
             )
         }
 

@@ -549,7 +549,7 @@ class FpvConfigScreen(private val parent: Screen?) :
             String.format("%.2f", aero),
             af.physicsModelVersion,
         )
-        g.drawCenteredString(font, line, width / 2, height - 44, 0x55FF55)
+        g.drawCenteredString(font, line, width / 2, height - 44, 0xFF55FF55.toInt())
     }
 
     private fun addToggle(x: Int, y: Int, w: Int, key: String,
@@ -662,9 +662,11 @@ class FpvConfigScreen(private val parent: Screen?) :
 
     // ---- rendering ----
     override fun render(g: GuiGraphics, mouseX: Int, mouseY: Int, delta: Float) {
-        renderBackground(g, mouseX, mouseY, delta)
+        // 1.21.11: renderWithTooltipAndSubtitles already calls renderBackground
+        // (blur + darken) before render(); a second call crashes with
+        // "Can only blur once per frame".
         if (page == 1 || page == 2) {
-            g.drawCenteredString(font, Component.translatable("gui.fpv.config"), width / 2, 6, 0xFFFFFF)
+            g.drawCenteredString(font, Component.translatable("gui.fpv.config"), width / 2, 6, 0xFFFFFFFF.toInt())
             if (page == 2) drawDerivedPerf(g)
             super.render(g, mouseX, mouseY, delta)
             return
@@ -678,18 +680,18 @@ class FpvConfigScreen(private val parent: Screen?) :
         val barW = (width - barX - 36).coerceAtLeast(40)
         val values = floatArrayOf(last.throttle, last.roll, last.pitch, last.yaw)
         for ((i, ch) in channels.withIndex()) {
-            g.drawString(font, Component.translatable("channel.fpv.${channelKey(ch)}"), 12, y + 5, 0xFFFFFF)
+            g.drawString(font, Component.translatable("channel.fpv.${channelKey(ch)}"), 12, y + 5, 0xFFFFFFFF.toInt())
             val v = values[i]
             val fromZero = ch == StickChannels.THROTTLE && !cfg.reversible3D
             drawBar(g, barX, y + 6, barW, v, fromZero)
-            g.drawString(font, String.format("%+.2f", v), barX + barW + 3, y + 5, 0x55FF55)
+            g.drawString(font, String.format("%+.2f", v), barX + barW + 3, y + 5, 0xFF55FF55.toInt())
             y += ROW_H
         }
 
         // Row labels for the two switch rows.
-        g.drawString(font, Component.translatable("gui.fpv.mode_switch_label"), 12, y + 5, 0xAAAAAA)
+        g.drawString(font, Component.translatable("gui.fpv.mode_switch_label"), 12, y + 5, 0xFFAAAAAA.toInt())
         y += ROW_H
-        g.drawString(font, Component.translatable("gui.fpv.arm_label"), 12, y + 5, 0xAAAAAA)
+        g.drawString(font, Component.translatable("gui.fpv.arm_label"), 12, y + 5, 0xFFAAAAAA.toInt())
 
         // Data-driven AUX channels (sliders/dials/switches), live values.
         y += ROW_H
@@ -697,18 +699,18 @@ class FpvConfigScreen(private val parent: Screen?) :
         y += ROW_H
         val auxList = last.auxChannels
         if (auxList.isEmpty()) {
-            g.drawString(font, Component.translatable("gui.fpv.aux_empty"), 12, y + 5, 0x888888)
+            g.drawString(font, Component.translatable("gui.fpv.aux_empty"), 12, y + 5, 0xFF888888.toInt())
         } else {
             for (a in auxList) {
                 if (y > height - 60) break
-                g.drawString(font, Component.literal(a.name), 12, y + 5, 0xFFFFFF)
-                g.drawString(font, Component.literal(a.source), 70, y + 5, 0x888888)
+                g.drawString(font, Component.literal(a.name), 12, y + 5, 0xFFFFFFFF.toInt())
+                g.drawString(font, Component.literal(a.source), 70, y + 5, 0xFF888888.toInt())
                 if (a.kind == "BUTTONS") {
                     val pos = if (a.position < 0) "-" else "${a.position + 1}/${a.positionCount}"
-                    g.drawString(font, Component.literal("POS $pos"), barX + 40, y + 5, 0x55FF55)
+                    g.drawString(font, Component.literal("POS $pos"), barX + 40, y + 5, 0xFF55FF55.toInt())
                 } else {
                     drawBar(g, barX, y + 6, barW, a.value, false)
-                    g.drawString(font, String.format("%+.2f", a.value), barX + barW + 3, y + 5, 0x55FF55)
+                    g.drawString(font, String.format("%+.2f", a.value), barX + barW + 3, y + 5, 0xFF55FF55.toInt())
                 }
                 y += ROW_H
             }
@@ -735,12 +737,12 @@ class FpvConfigScreen(private val parent: Screen?) :
         }
         if (learnFlash > 0f) {
             learnFlash -= delta / 20f
-            g.drawCenteredString(font, Component.translatable("gui.fpv.move_stick"), width / 2, 6, 0xFFFF55)
+            g.drawCenteredString(font, Component.translatable("gui.fpv.move_stick"), width / 2, 6, 0xFFFFFF55.toInt())
         } else if (learnTarget != OFF) {
-            g.drawCenteredString(font, Component.translatable("gui.fpv.listening"), width / 2, 6, 0xFFFF55)
+            g.drawCenteredString(font, Component.translatable("gui.fpv.listening"), width / 2, 6, 0xFFFFFF55.toInt())
         }
 
-        g.drawString(font, Component.translatable("gui.fpv.keyboard_section"), 12, height - 44, 0xAAAAAA)
+        g.drawString(font, Component.translatable("gui.fpv.keyboard_section"), 12, height - 44, 0xFFAAAAAA.toInt())
 
         super.render(g, mouseX, mouseY, delta)
     }

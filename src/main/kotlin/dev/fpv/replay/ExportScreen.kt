@@ -86,9 +86,9 @@ class ExportScreen(private val parent: Screen?) :
     }
 
     override fun render(g: GuiGraphics, mouseX: Int, mouseY: Int, delta: Float) {
-        renderBackground(g, mouseX, mouseY, delta)
+        // Background already drawn by renderWithTooltipAndSubtitles.
         super.render(g, mouseX, mouseY, delta)
-        g.drawCenteredString(font, Component.translatable("screen.fpv.export"), width / 2, 8, 0xFFFFFF)
+        g.drawCenteredString(font, Component.translatable("screen.fpv.export"), width / 2, 8, 0xFFFFFFFF.toInt())
 
         if (CinematicExport.exporting) {
             val frac = if (CinematicExport.totalFrames > 0)
@@ -101,11 +101,11 @@ class ExportScreen(private val parent: Screen?) :
                 font,
                 Component.translatable("gui.fpv.export.progress",
                     CinematicExport.currentFrame, CinematicExport.totalFrames),
-                width / 2, height - 52, 0x55FF55,
+                width / 2, height - 52, 0xFF55FF55.toInt(),
             )
         }
         if (CinematicExport.status.isNotEmpty()) {
-            g.drawCenteredString(font, CinematicExport.status, width / 2, height - 30, 0xFFFF55)
+            g.drawCenteredString(font, CinematicExport.status, width / 2, height - 30, 0xFFFFFF55.toInt())
         }
     }
 

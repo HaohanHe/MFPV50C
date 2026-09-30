@@ -91,21 +91,21 @@ class RaceScreen(private val last: Screen?) : Screen(Component.literal("F9U Race
     private fun refresh() { /* next render reads live state; no rebuild needed except name */ }
 
     override fun render(g: GuiGraphics, mouseX: Int, mouseY: Int, delta: Float) {
-        renderBackground(g, mouseX, mouseY, delta)
+        // Background already drawn by renderWithTooltipAndSubtitles.
         super.render(g, mouseX, mouseY, delta)
         val font = this.font
         var y = 6
-        g.drawString(font, "F9U RACE EDITOR  (1m ~= 1 block)", 8, y, 0xFFFFFF, true)
+        g.drawString(font, "F9U RACE EDITOR  (1m ~= 1 block)", 8, y, 0xFFFFFFFF.toInt(), true)
         y += 12
 
         // Gate list.
         val gates = RaceManager.track.gates
-        g.drawString(font, "Gates (${gates.size}): timing=${RaceManager.track.timingGateIndex}", 8, 96, 0xAAAAAA, true)
+        g.drawString(font, "Gates (${gates.size}): timing=${RaceManager.track.timingGateIndex}", 8, 96, 0xFFAAAAAA.toInt(), true)
         var gy = 108
         gates.forEachIndexed { i, gt ->
             val sel = if (i == selectedGate) "> " else "  "
             g.drawString(font, "$sel#$i ${gt.gateShape()} ${String.format("%.1fx%.1f", gt.width, gt.height)}", 10, gy,
-                if (i == selectedGate) 0xFFFF55 else 0xFFFFFF, false)
+                if (i == selectedGate) 0xFFFFFF55.toInt() else 0xFFFFFFFF.toInt(), false)
             gy += 11
             if (gy > height - 10) return@forEachIndexed
         }
@@ -113,16 +113,16 @@ class RaceScreen(private val last: Screen?) : Screen(Component.literal("F9U Race
         // Race readout (right column).
         val rx = width - 150
         var ry = 90
-        g.drawString(font, "Phase: ${RaceManager.phase}", rx, ry, 0xFFFFFF, true); ry += 11
-        g.drawString(font, "Lap ${RaceManager.lapsCompleted()}/${RaceManager.lapsRemaining()} left", rx, ry, 0x55FF55, true); ry += 11
-        g.drawString(font, "Time ${RaceManager.elapsedMs() / 1000.0}s", rx, ry, 0x55FF55, true); ry += 11
-        g.drawString(font, "Left ${RaceManager.remainingTimeMs() / 1000.0}s", rx, ry, 0xFFFF55, true); ry += 11
-        g.drawString(font, "Pen +${RaceManager.penaltyMs() / 1000.0}s", rx, ry, 0xFF5555, true); ry += 11
-        g.drawString(font, RaceManager.rankingSummary(), rx, ry, 0x55FFFF, true); ry += 11
-        if (RaceManager.isDnf()) g.drawString(font, "DNF", rx, ry, 0xFF3333, true)
+        g.drawString(font, "Phase: ${RaceManager.phase}", rx, ry, 0xFFFFFFFF.toInt(), true); ry += 11
+        g.drawString(font, "Lap ${RaceManager.lapsCompleted()}/${RaceManager.lapsRemaining()} left", rx, ry, 0xFF55FF55.toInt(), true); ry += 11
+        g.drawString(font, "Time ${RaceManager.elapsedMs() / 1000.0}s", rx, ry, 0xFF55FF55.toInt(), true); ry += 11
+        g.drawString(font, "Left ${RaceManager.remainingTimeMs() / 1000.0}s", rx, ry, 0xFFFFFF55.toInt(), true); ry += 11
+        g.drawString(font, "Pen +${RaceManager.penaltyMs() / 1000.0}s", rx, ry, 0xFFFF5555.toInt(), true); ry += 11
+        g.drawString(font, RaceManager.rankingSummary(), rx, ry, 0xFF55FFFF.toInt(), true); ry += 11
+        if (RaceManager.isDnf()) g.drawString(font, "DNF", rx, ry, 0xFFFF3333.toInt(), true)
 
         if (System.currentTimeMillis() < toastUntil)
-            g.drawCenteredString(font, toast, width / 2, height - 12, 0xFFFFFF)
+            g.drawCenteredString(font, toast, width / 2, height - 12, 0xFFFFFFFF.toInt())
     }
 
     override fun onClose() { minecraft.setScreen(last) }

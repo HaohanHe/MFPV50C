@@ -198,11 +198,11 @@ class OsdEditorScreen(private val parent: Screen?) :
     }
 
     private fun colorFor(id: String): Int = when (id) {
-        OsdLayout.SPEED, OsdLayout.THROTTLE, OsdLayout.BATTERY, OsdLayout.LQ -> 0x55FF55
-        OsdLayout.TARGET -> 0x55FFFF
-        OsdLayout.FLIGHT_TIMER -> 0xAAAAAA
-        OsdLayout.MODE -> 0x55FF55
-        else -> 0xFFFFFF
+        OsdLayout.SPEED, OsdLayout.THROTTLE, OsdLayout.BATTERY, OsdLayout.LQ -> 0xFF55FF55.toInt()
+        OsdLayout.TARGET -> 0xFF55FFFF.toInt()
+        OsdLayout.FLIGHT_TIMER -> 0xFFAAAAAA.toInt()
+        OsdLayout.MODE -> 0xFF55FF55.toInt()
+        else -> 0xFFFFFFFF.toInt()
     }
 
     // ---- Hit / highlight geometry (guiScaled pixels) ----
@@ -329,10 +329,10 @@ class OsdEditorScreen(private val parent: Screen?) :
         g.drawCenteredString(
             font,
             Component.literal("Click to select \u00B7 drag to move \u00B7 arrows nudge (Shift=10px)"),
-            cx, 4, 0xFFFFFF,
+            cx, 4, 0xFFFFFFFF.toInt(),
         )
         selected()?.let { s ->
-            g.drawString(font, "x=${s.x} y=${s.y}", 8, height - BOTTOM_BAR - 12, 0xAAAAAA)
+            g.drawString(font, "x=${s.x} y=${s.y}", 8, height - BOTTOM_BAR - 12, 0xFFAAAAAA.toInt())
         }
 
         // Translucent strip behind the control buttons only.
@@ -366,9 +366,9 @@ class OsdEditorScreen(private val parent: Screen?) :
                 g.fill(cx + 30, cy - 3, cx + 36, cy + 3, 0xFF55FF55.toInt())
             }
             OsdLayout.MODE ->
-                g.drawCenteredString(font, "FPV ACRO", cx, 8, 0x55FF55)
+                g.drawCenteredString(font, "FPV ACRO", cx, 8, 0xFF55FF55.toInt())
             OsdLayout.CENTER_WARNING ->
-                g.drawCenteredString(font, "(warn)", cx, cy + 14, 0xFFFF55)
+                g.drawCenteredString(font, "(warn)", cx, cy + 14, 0xFFFFFF55.toInt())
         }
     }
 
@@ -383,6 +383,6 @@ class OsdEditorScreen(private val parent: Screen?) :
 
     companion object {
         private const val BOTTOM_BAR = 30
-        private const val DISABLED = 0x606060
+        private const val DISABLED = 0xFF606060.toInt()
     }
 }
