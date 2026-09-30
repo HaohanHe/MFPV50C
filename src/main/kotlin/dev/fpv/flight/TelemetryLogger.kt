@@ -22,28 +22,50 @@ class TelemetryLogger {
     private var writer: BufferedWriter? = null
     private var accumulated = 0f
 
+    /** Session metadata stamped into the header (D: incident traceability). */
+    private var meta: String = ""
+
     private val dir: Path
         get() = FabricLoader.getInstance().gameDir.resolve("fpv-telemetry")
 
     fun isOpen(): Boolean = writer != null
 
-    /** Open a fresh timestamped file for this session. No-op if already open. */
-    fun open() {
+    /**
+     * Open a fresh timestamped file for this session, stamping the mod version,
+     * config SHA-256 and device fingerprint into the header for post-incident
+     * review. No-op if already open.
+     */
+    fun open(modVersion: String, configHash: String, deviceFingerprint: String) {
         if (writer != null) return
         Files.createDirectories(dir)
         val stamp = LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyyMMdd_HHmmss"))
         val file = dir.resolve("flight_$stamp.jsonl")
         writer = Files.newBufferedWriter(file)
-        // Header line: document the virtual nature of this data.
+        meta = """{"_meta":{"modVersion":"$modVersion","configHash":"$configHash",""" +
+            """"device":"$deviceFingerprint","opened":"$stamp"}}"""
+        // Header: metadata + a line documenting the virtual nature of the data.
+        writer!!.append(meta).append('\n')
         writer!!.append(
             "{\"_comment\":\"virtual FPV telemetry (no real link/ESC); vbat/LQ are simulated\"}\n"
         )
+        writer!!.flush()
+    }
+
+    /** Append an immediately-flushed severe-event marker (never silently lost). */
+    fun crashMark(reason: String) {
+        val w = writer ?: return
+        val stamp = LocalDateTime.now().format(DateTimeFormatter.ISO_LOCAL_DATE_TIME)
+        runCatching {
+            w.append("{\"_event\":\"$reason\",\"at\":\"$stamp\"}\n")
+            w.flush()
+        }
     }
 
     fun close() {
         try { writer?.flush(); writer?.close() } catch (_: Exception) {}
         writer = null
         accumulated = 0f
+        meta = ""
     }
 
     /**

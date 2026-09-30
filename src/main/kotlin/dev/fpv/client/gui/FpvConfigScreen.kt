@@ -147,8 +147,8 @@ class FpvConfigScreen(private val parent: Screen?) :
             )
         }
 
-        // Bottom row: reset / advanced / race track / OSD editor / replays.
-        val bottomN = 5
+        // Bottom row: reset / advanced / race track / OSD editor / replays / safety.
+        val bottomN = 6
         val bottomGap = 4
         val bottomTotal = w - 24
         val bottomW = (bottomTotal - (bottomN - 1) * bottomGap) / bottomN
@@ -179,6 +179,11 @@ class FpvConfigScreen(private val parent: Screen?) :
             Button.builder(Component.translatable("gui.fpv.replays")) {
                 minecraft.setScreen(dev.fpv.replay.ReplayScreen(this))
             }.bounds(bottomAt(4), Y_RESET, bottomW, 18).build()
+        )
+        addRenderableWidget(
+            Button.builder(Component.translatable("gui.fpv.safety")) {
+                minecraft.setScreen(SafetyScreen(this))
+            }.bounds(bottomAt(5), Y_RESET, bottomW, 18).build()
         )
         addRenderableWidget(
             Button.builder(Component.translatable("gui.fpv.done")) { onClose() }

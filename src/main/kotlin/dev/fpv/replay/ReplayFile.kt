@@ -230,8 +230,8 @@ class ReplayFile(
             startIso: String,
             records: List<Rec>,
         ) {
-            Files.createDirectories(path.parent)
-            DataOutputStream(Files.newOutputStream(path).buffered()).use { d ->
+            val buf = java.io.ByteArrayOutputStream()
+            DataOutputStream(buf.buffered()).use { d ->
                 d.writeBytes("FPVR")
                 d.writeInt(1)
                 d.writeFloat(sampleRateHz)
@@ -256,6 +256,8 @@ class ReplayFile(
                     for (k in 0 until ReplaySample.AUX_SLOTS) d.writeFloat(a.getOrElse(k) { 0f })
                 }
             }
+            // Atomic finalize: a crash at stop can never leave a truncated .fpr.
+            dev.fpv.flight.AtomicFiles.writeBytes(path, buf.toByteArray())
         }
     }
 

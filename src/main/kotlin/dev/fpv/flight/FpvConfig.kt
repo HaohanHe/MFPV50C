@@ -218,6 +218,9 @@ class ExportConfig {
 }
 
 class FpvConfig {
+    /** Schema version of the persisted file (used to select migration / detect old saves). */
+    var schemaVersion = Defaults.CONFIG_SCHEMA_VERSION
+
     /** Master switch for FPV mode. */
     var enabled = true
 
@@ -477,7 +480,7 @@ class FpvConfig {
     }
 
     /** Repair missing/short calibration data after loading older JSON. */
-    private fun migrate() {
+    fun migrate() {
         if (slotCalib.size != StickSlot.entries.size) slotCalib = defaultSlots()
         // Older configs predate the nested battery/failsafe blocks; fill defaults.
         if (battery == null) battery = BatteryConfig()
@@ -497,14 +500,76 @@ class FpvConfig {
     }
 
     // ---- Persistence ----
+    /** Non-persisted notice from load/restore (config fell back / file quarantined). */
+    @Transient
+    var loadNotice: String = ""
+
     fun save() {
         // Keep the active profile's hand-mode/arm in sync with the live setting.
         activeProfile()?.let {
             it.handMode = handMode
             it.armButton = armButtonIndex
         }
-        Files.createDirectories(configPath().parent)
-        Files.writeString(configPath(), gson.toJson(this))
+        val p = configPath()
+        // Back up the previous version before overwriting, then atomic write so a
+        // crash mid-save can never leave a half-written fpvcraft.json.
+        ConfigSafety.rotateBackup(FabricLoader.getInstance().configDir)
+        AtomicFiles.writeText(p, gson.toJson(this))
+    }
+
+    /** True when the loaded config has the minimum required structure/values. */
+    fun isSane(): Boolean {
+        if (airframes.isEmpty() || osdElements.isEmpty()) return false
+        if (airframes.none { it.name == activeAirframeName }) return false
+        val af = activeAirframe()
+        if (!(af.massKg.isFinite() && af.massKg > 0f)) return false
+        if (!(af.maxThrustPerMotorN.isFinite() && af.maxThrustPerMotorN > 0f)) return false
+        listOf(roll, pitch, yaw).forEach {
+            if (!(it.max.isFinite() && it.center.isFinite())) return false
+        }
+        return true
+    }
+
+    /** Reset this live config to built-in safe defaults and persist. */
+    fun resetToDefaults() {
+        adoptFrom(FpvConfig())
+        loadNotice = "已恢复为默认配置"
+        save()
+    }
+
+    /** Restore the backup at [index] (0 = newest); returns false if it was unusable. */
+    fun restoreBackup(index: Int): Boolean {
+        val root = FabricLoader.getInstance().configDir
+        val b = ConfigSafety.listBackups(root).getOrNull(index) ?: return false
+        val c = ConfigSafety.tryParse(b) ?: return false
+        adoptFrom(c)
+        loadNotice = "已恢复到备份 ${b.fileName}"
+        save()
+        return true
+    }
+
+    /** Backup labels newest-first for the config UI (timestamp portion). */
+    fun backupLabels(): List<String> =
+        ConfigSafety.listBackups(FabricLoader.getInstance().configDir)
+            .map { it.fileName.toString().removePrefix("fpvcraft-").removeSuffix(".json") }
+
+    /**
+     * Overwrite every persisted field of THIS instance with [other]'s state.
+     * Data-driven via reflection so newly added fields are covered automatically;
+     * readers (flight/render) pick up the values next frame -- no restart needed.
+     */
+    private fun adoptFrom(other: FpvConfig) {
+        val fresh = snapshot(other)
+        var cls: Class<*>? = FpvConfig::class.java
+        while (cls != null) {
+            for (f in cls.declaredFields) {
+                val mod = f.modifiers
+                if (java.lang.reflect.Modifier.isStatic(mod) || f.isSynthetic) continue
+                f.isAccessible = true
+                f.set(this, f.get(fresh))
+            }
+            cls = cls.superclass
+        }
     }
 
     companion object {
@@ -572,14 +637,18 @@ class FpvConfig {
         private fun configPath(): Path =
             FabricLoader.getInstance().configDir.resolve("fpvcraft.json")
 
-        fun load(): FpvConfig = try {
-            val p = configPath()
-            if (Files.exists(p))
-                (gson.fromJson(Files.readString(p), FpvConfig::class.java) ?: FpvConfig())
-                    .also { it.migrate() }
-            else FpvConfig()
-        } catch (e: Exception) {
-            FpvConfig()
+        /** Round-trip [other] through Gson into a fresh, migrated instance. */
+        private fun snapshot(other: FpvConfig): FpvConfig =
+            gson.fromJson(gson.toJson(other), FpvConfig::class.java).also { it.migrate() }
+
+        /** SHA-256 of [c]'s serialized form (blackbox config fingerprint). */
+        fun contentHash(c: FpvConfig): String = Hashes.sha256Hex(gson.toJson(c))
+
+        /** Robust load delegated to the headless-testable [ConfigSafety] engine. */
+        fun load(): FpvConfig {
+            val r = ConfigSafety.robustLoad(FabricLoader.getInstance().configDir)
+            r.config.loadNotice = r.notice
+            return r.config
         }
     }
 }

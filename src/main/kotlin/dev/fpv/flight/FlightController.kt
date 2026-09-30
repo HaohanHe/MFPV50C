@@ -252,6 +252,11 @@ class FlightController(val cfg: FpvConfig = FpvConfig()) {
      * attitude integration + rate measurement for one frame.
      */
     private fun integrate(cmd: FloatArray, dt: Float, throttleCmd: Float) {
+        // Never let a bad number propagate: sanitize the incoming attitude and
+        // commands first (a NaN here would otherwise poison the integral below).
+        SafetyGuards.sanitize(attitude, attitude)
+        for (i in 0..2) if (!cmd[i].isFinite()) cmd[i] = 0f
+        val thr = if (throttleCmd.isFinite()) throttleCmd else 0f
         // Attitude relative to level: [rollDeg positive=banked right,
         // pitchDeg positive=nose down] - feeds the crash detector. NOTE this is
         // the body/error convention (positive = banked right), opposite to the
@@ -266,7 +271,7 @@ class FlightController(val cfg: FpvConfig = FpvConfig()) {
         val levelAtt = floatArrayOf(rollLevelDeg, pitchLevelDeg, 0f)
 
         // Crash detection runs off the pre-PID commanded rates.
-        val crashResult = crash.update(cmd, bodyRates, levelAtt, throttleCmd, dt)
+        val crashResult = crash.update(cmd, bodyRates, levelAtt, thr, dt)
         crashRecovering = crashResult.state == CrashResult.State.RECOVER
         if (crashRecovering) {
             // Leveling override: direct recovery rates, throttle cut by caller.
@@ -299,7 +304,7 @@ class FlightController(val cfg: FpvConfig = FpvConfig()) {
         // body -Z at offset r=(x,y,z): torque τ = r x F = (-y*T, x*T, 0).
         // Default cg offset is 0, so this is a no-op until the pilot moves it.
         // (Full 6-DOF moment arm / aerodynamic moments are a later,真机-tuned step.)
-        val T = af.totalThrustN(throttleCmd)
+        val T = af.totalThrustN(thr)
         val tauX = -af.cgOffsetY * T
         val tauY = af.cgOffsetX * T
         for (b in BodyAxis.entries) {
@@ -322,7 +327,9 @@ class FlightController(val cfg: FpvConfig = FpvConfig()) {
         }
 
         // Body-frame post-multiply integration; axis vectors from BodyAxis.
-        // Integrate the tracked (actual) rates, not the commanded ones.
+        // Integrate the tracked (actual) rates, not the commanded ones. Guard
+        // the rates once more so a NaN plant can never enter the quaternion.
+        for (i in 0..2) if (!trackedRates[i].isFinite()) trackedRates[i] = 0f
         val oldAtt = Quaternionf(attitude)
         val deltaQ = Quaternionf()
         for (b in BodyAxis.entries) {
@@ -330,13 +337,16 @@ class FlightController(val cfg: FpvConfig = FpvConfig()) {
             deltaQ.mul(Quaternionf().rotateAxis(toRad(trackedRates[b.index] * dt), a.x, a.y, a.z))
         }
         attitude.mul(deltaQ).normalize()
+        SafetyGuards.sanitize(attitude, attitude)
 
         // Measure actual motion -> next frame's damping term.
         val m = AttitudeMath.bodyRatesDps(oldAtt, attitude, dt)
         angle.measuredDps[0] = m[0]
         angle.measuredDps[1] = m[1]
         angle.measuredDps[2] = m[2]
-        bodyRates[0] = m[0]; bodyRates[1] = m[1]; bodyRates[2] = m[2]
+        bodyRates[0] = if (m[0].isFinite()) m[0] else 0f
+        bodyRates[1] = if (m[1].isFinite()) m[1] else 0f
+        bodyRates[2] = if (m[2].isFinite()) m[2] else 0f
     }
 
     /** Current heading in MC yaw degrees, matching AngleController.rebaseline. */

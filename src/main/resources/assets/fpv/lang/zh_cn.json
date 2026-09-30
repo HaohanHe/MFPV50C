@@ -183,6 +183,8 @@
   "screen.fpv.replay": "回放中心",
   "screen.fpv.export": "电影导出",
   "gui.fpv.replays": "回放",
+  "gui.fpv.safety": "安全 / 备份",
+  "gui.fpv.safety.reset": "恢复默认配置",
   "gui.fpv.replay.playpause": "播放 / 暂停",
   "gui.fpv.replay.stop": "停止",
   "gui.fpv.replay.speed": "速度",

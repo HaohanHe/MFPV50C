@@ -141,4 +141,10 @@ object Defaults {
     const val OSD_PITCH_TICK_HALF = 10
     /** Absolute pitch angles (degrees) at which reference ticks are drawn (both signs). */
     val OSD_PITCH_LADDER_DEG = intArrayOf(15, 30)
+
+    // ---- Config safety net ----
+    /** Schema version stamped into fpvcraft.json (bump when migration changes meaning). */
+    const val CONFIG_SCHEMA_VERSION = 1
+    /** Number of rotated config backups to keep. */
+    const val CONFIG_BACKUP_KEEP = 10
 }

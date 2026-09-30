@@ -14,6 +14,7 @@
 package dev.fpv.client.mixin
 
 import dev.fpv.client.FpvClient
+import dev.fpv.flight.SafetyGuards
 import net.minecraft.client.Minecraft
 import net.minecraft.world.entity.LivingEntity
 import net.minecraft.world.entity.MoverType
@@ -51,17 +52,23 @@ class LivingEntityMixin {
 
         // Nose forward in world coordinates (single source: integrated attitude).
         val fwd = Vector3f(0f, 0f, -1f).rotate(FpvClient.flight.attitude)
+        // Attitude is sanitized each integrate; if it is ever non-finite here,
+        // produce no thrust rather than a NaN velocity.
+        val fwdOk = SafetyGuards.finite(fwd)
 
         // Data-driven airframe. Real SI force -> per-tick velocity units via
         // TICK_ACCEL, anchored so 9.81 m/s^2 maps to the legacy 0.05 blocks/tick^2.
         val af = cfg.activeAirframe()
         val tMag = abs(t)
         val thrustAccelMps2 = af.totalThrustN(tMag) / af.massKg.coerceAtLeast(1e-3f)
-        val thrustDelta = thrustAccelMps2 * TICK_ACCEL * sign(t)
+        val thrustDelta = if (fwdOk && thrustAccelMps2.isFinite())
+            thrustAccelMps2 * TICK_ACCEL * sign(t) else 0f
 
-        var vx = player.deltaMovement.x
-        var vy = player.deltaMovement.y
-        var vz = player.deltaMovement.z
+        // A pre-existing NaN velocity (vanilla treats NaN movement as a kick) is
+        // reset to zero rather than carried forward.
+        var vx = if (player.deltaMovement.x.isFinite()) player.deltaMovement.x else 0.0
+        var vy = if (player.deltaMovement.y.isFinite()) player.deltaMovement.y else 0.0
+        var vz = if (player.deltaMovement.z.isFinite()) player.deltaMovement.z else 0.0
 
         val gravityDelta = GRAVITY * (af.gravity / 9.81f)
         vx += fwd.x() * thrustDelta
@@ -81,7 +88,11 @@ class LivingEntityMixin {
             vz -= decel * (vz / speed)
         }
 
-        val v = Vec3(vx, vy, vz)
+        // Final guard: never assign/move on a NaN velocity (vanilla kicks on NaN).
+        val fx = if (vx.isFinite()) vx else 0.0
+        val fy = if (vy.isFinite()) vy else 0.0
+        val fz = if (vz.isFinite()) vz else 0.0
+        val v = Vec3(fx, fy, fz)
         player.deltaMovement = v
         // Vanilla travel would have moved us after setting velocity; do it here.
         player.move(MoverType.SELF, v)

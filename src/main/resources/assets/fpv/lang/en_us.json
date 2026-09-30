@@ -184,6 +184,8 @@
   "screen.fpv.replay": "Replay Center",
   "screen.fpv.export": "Cinematic Export",
   "gui.fpv.replays": "Replays",
+  "gui.fpv.safety": "Safety / Backups",
+  "gui.fpv.safety.reset": "Reset to defaults",
   "gui.fpv.replay.playpause": "Play / Pause",
   "gui.fpv.replay.stop": "Stop",
   "gui.fpv.replay.speed": "Speed",

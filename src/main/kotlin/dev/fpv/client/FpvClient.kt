@@ -20,11 +20,13 @@ import dev.fpv.flight.FpvConfig
 import dev.fpv.flight.LinkMonitor
 import dev.fpv.flight.LinkState
 import dev.fpv.flight.ModesController
+import dev.fpv.flight.SafetyGuards
 import dev.fpv.flight.TelemetryLogger
 import dev.fpv.flight.TelemetrySample
 import dev.fpv.flight.ThrottleCurve
 import dev.fpv.flight.ThrottleLimiter
 import dev.fpv.race.RaceManager
+import net.fabricmc.loader.api.FabricLoader
 import dev.fpv.input.InputManager
 import net.fabricmc.api.ClientModInitializer
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents
@@ -316,6 +318,15 @@ object FpvClient : ClientModInitializer {
         link.update(radioPresent, dt)
         handleFailsafe()
 
+        // Clamp incoming channels so an out-of-range/non-finite value becomes
+        // neutral before it reaches the rate math (defense in depth).
+        channels.roll = SafetyGuards.channel(channels.roll)
+        channels.pitch = SafetyGuards.channel(channels.pitch)
+        channels.yaw = SafetyGuards.channel(channels.yaw)
+        val thrLo = if (config.reversible3D) -1f else 0f
+        channels.throttle = if (channels.throttle.isFinite())
+            channels.throttle.coerceIn(thrLo, 1f) else 0f
+
         // Throttle curve + boost on the raw channel, then the limiter
         // (published scale/limit).
         throttle = throttleCurve.apply(channels.throttle, dt, config.reversible3D)
@@ -344,7 +355,9 @@ object FpvClient : ClientModInitializer {
 
         // Telemetry logger: open/close with the config flag, sample on a fixed period.
         if (config.telemetryEnabled) {
-            logger.open()
+            val modVer = FabricLoader.getInstance().getModContainer("fpv")
+                .map { it.metadata.version.friendlyString }.orElse("0.1.0")
+            logger.open(modVer, FpvConfig.contentHash(config), config.activeProfileFingerprint)
             logger.maybeWrite(
                 dt,
                 TelemetrySample(
@@ -385,7 +398,18 @@ object FpvClient : ClientModInitializer {
         // is driven by ReplayManager instead.
         if (ReplayManager.active) return
 
-        flight.step(channels, dt, throttle)
+        try {
+            flight.step(channels, dt, throttle)
+        } catch (e: Exception) {
+            // Severe runtime fault: make sure it reaches the blackbox before unwinding.
+            if (!logger.isOpen()) {
+                val modVer = FabricLoader.getInstance().getModContainer("fpv")
+                    .map { it.metadata.version.friendlyString }.orElse("0.1.0")
+                logger.open(modVer, FpvConfig.contentHash(config), config.activeProfileFingerprint)
+            }
+            logger.crashMark("flight.step ${e.javaClass.simpleName}: ${e.message ?: ""}")
+            throw e
+        }
         // Crash recovery holds a leveling override and cuts the throttle.
         if (flight.crashRecovering) throttle = 0f
 
