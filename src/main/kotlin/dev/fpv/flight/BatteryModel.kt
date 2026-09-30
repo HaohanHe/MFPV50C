@@ -32,30 +32,32 @@ class BatteryModel(private val cfg: FpvConfig) {
     private var sagV: Float = 0f
 
     init {
-        val b = cfg.battery ?: BatteryConfig()
-        vbat = b.cellCount * Defaults.VBAT_FULL_CELL
+        vbat = cells() * Defaults.VBAT_FULL_CELL
     }
 
+    /** Effective series cells: airframe S override if set, else the pack. */
+    private fun cells(): Int = cfg.activeAirframe().effectiveCellCount(cfg.activeBattery().cellCount)
+
     /** Full pack voltage from the configured cell count. */
-    private fun fullPackV(): Float = (cfg.battery?.cellCount ?: 4) * Defaults.VBAT_FULL_CELL
+    private fun fullPackV(): Float = cells() * Defaults.VBAT_FULL_CELL
 
     private fun emptyPackV(): Float =
-        (cfg.battery?.cellCount ?: 4) * (cfg.battery?.criticalCellV ?: Defaults.VBAT_CRITICAL_CELL)
+        cells() * cfg.activeBattery().criticalCellV
 
     /** State of charge 0..1, from capacity when configured, else from voltage. */
     fun percent(): Float {
-        val b = cfg.battery ?: return 0f
+        val b = cfg.activeBattery()
         if (b.packCapacityMah > 0) {
             return (1f - mAhDrawn / b.packCapacityMah) * 100f
         }
         // Voltage-only linear estimate between critical and full per-cell.
-        val perCell = vbat / b.cellCount
+        val perCell = vbat / cells()
         val span = Defaults.VBAT_FULL_CELL - b.criticalCellV
         if (span <= 0f) return 0f
         return ((perCell - b.criticalCellV) / span * 100f).coerceIn(0f, 100f)
     }
 
-    fun perCell(): Float = vbat / (cfg.battery?.cellCount ?: 4)
+    fun perCell(): Float = vbat / cells()
 
     /**
      * Advance the model one frame.
@@ -64,7 +66,7 @@ class BatteryModel(private val cfg: FpvConfig) {
      * @param dt       frame seconds
      */
     fun update(throttle: Float, dt: Float) {
-        val b = cfg.battery ?: return
+        val b = cfg.activeBattery()
         val demand = kotlin.math.abs(throttle)
 
         // mAh integration: I = k * demand, mAh = integral(I dt / 3600).

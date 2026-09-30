@@ -12,7 +12,9 @@ package dev.fpv.input
  *  - pitch:    -1..1, positive = push forward / nose down
  *  - yaw:      -1..1, positive = right
  *  - throttle:  0..1 in normal mode; -1..1 with 0 at center in reversible-3D mode
- *  - aux:      switch channels, -1..1
+ *  - aux:      switch channels, -1..1 (indexed by RAW axis index for legacy
+ *              consumers; mode/arm/headadjust switches)
+ *  - auxChannels: richer, data-driven logical AUX list (axis + grouped buttons)
  */
 data class StickChannels(
     @JvmField var roll: Float = 0f,
@@ -22,6 +24,8 @@ data class StickChannels(
     @JvmField var aux: FloatArray = FloatArray(0),
     @JvmField var present: Boolean = false,
     @JvmField var sourceName: String = "",
+    /** Richer, data-driven logical AUX list (axis + grouped buttons). */
+    @JvmField var auxChannels: List<AuxState> = emptyList(),
 ) {
     companion object {
         /** Logical channel indices. */

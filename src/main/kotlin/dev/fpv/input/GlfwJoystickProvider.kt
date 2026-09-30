@@ -5,6 +5,11 @@
  * Spektrum receivers enumerate as generic HID joysticks, which GLFW exposes as
  * raw axes; they are NOT SDL gamepads, so the gamecontroller mapping path is
  * intentionally not used here.
+ *
+ * All axes and ALL buttons are enumerated dynamically (counts come from GLFW at
+ * runtime). AUX channels are a growable list: continuous axes become AXIS
+ * channels, and observed mutually-exclusive button groups become multi-position
+ * switch channels (EdgeTX "Btn" mode).
  */
 package dev.fpv.input
 
@@ -25,7 +30,12 @@ class GlfwJoystickProvider(private val cfg: FpvConfig) : InputProvider {
     var axisCount: Int = 0
         private set
 
+    var buttonCount: Int = 0
+        private set
+
     private var lastAxes: FloatArray = FloatArray(0)
+    private var lastButtons: ByteArray = ByteArray(0)
+    private val analyzer = AuxAnalyzer()
 
     /** Resolve the device to use: the configured id, else the first present one. */
     private fun resolve(): Int {
@@ -42,21 +52,27 @@ class GlfwJoystickProvider(private val cfg: FpvConfig) : InputProvider {
     /** True when a USB device is currently attached (call after refresh). */
     fun present(): Boolean = resolve() >= 0
 
-    /** Refresh and expose the raw axis vector of the active device (may be empty). */
+    /** Refresh raw axes + buttons of the active device. */
     fun refreshRaw(): FloatArray {
         val j = resolve()
         jid = j
         if (j < 0) {
             deviceName = ""
             axisCount = 0
+            buttonCount = 0
             lastAxes = FloatArray(0)
+            lastButtons = ByteArray(0)
             return lastAxes
         }
         deviceName = GLFW.glfwGetJoystickName(j) ?: "Radio"
-        val buf = GLFW.glfwGetJoystickAxes(j)
-        val n = buf?.remaining() ?: 0
-        axisCount = n
-        lastAxes = if (buf == null || n == 0) FloatArray(0) else FloatArray(n) { buf[it] }
+        val ab = GLFW.glfwGetJoystickAxes(j)
+        axisCount = ab?.remaining() ?: 0
+        lastAxes = if (ab == null || axisCount == 0) FloatArray(0) else FloatArray(axisCount) { ab[it] }
+        val bb = GLFW.glfwGetJoystickButtons(j)
+        buttonCount = bb?.remaining() ?: 0
+        lastButtons = if (bb == null || buttonCount == 0) ByteArray(0) else ByteArray(buttonCount) { bb[it] }
+        analyzer.onDevice(axisCount, buttonCount, "$jid:$deviceName:$axisCount:$buttonCount")
+        analyzer.observe(lastAxes, lastButtons)
         return lastAxes
     }
 
@@ -79,22 +95,101 @@ class GlfwJoystickProvider(private val cfg: FpvConfig) : InputProvider {
         ch.yaw = readChannel(axes, StickChannels.YAW)
         ch.throttle = readChannel(axes, StickChannels.THROTTLE)
 
-        // Aux is indexed by RAW axis index: bound axes read 0, unbound axes carry
-        // their raw value neutralized around the GLFW standard center. Unbound
-        // axes are uncalibrated: their travel is not assumed, only the GLFW
-        // documented center 0 and range [-1,1] are relied on (sufficient for
-        // switch triggering, which thresholds at Defaults.SWITCH_TRIGGER).
+        // Legacy aux: indexed by RAW axis index (consumed by mode/arm/headadjust).
         val aux = FloatArray(axes.size)
         val used = BooleanArray(axes.size)
         for (slot in StickSlot.entries) {
             val ai = cfg.slotCalib[slot.ordinal].axisIndex
             if (ai in axes.indices) used[ai] = true
         }
-        for (i in axes.indices) {
-            if (!used[i]) aux[i] = axes[i]
-        }
+        for (i in axes.indices) if (!used[i]) aux[i] = axes[i]
         ch.aux = aux
+
+        // Data-driven logical AUX list.
+        reconcileAux(used)
+        ch.auxChannels = cfg.auxChannels.map { evalAux(it) }
         return ch
+    }
+
+    /**
+     * Grow cfg.auxChannels to cover every discovered source (free axes and
+     * observed button groups), assigning EdgeTX-style suggested names. Existing
+     * user entries are never overwritten.
+     */
+    private fun reconcileAux(usedAxis: BooleanArray) {
+        val have = cfg.auxChannels.map { signature(it) }.toHashSet()
+        var axisN = 0
+        var btnN = 0
+        for (i in lastAxes.indices) {
+            if (usedAxis[i]) continue
+            val sig = "axis:$i"
+            if (sig in have) continue
+            val name = when (axisN) { 0 -> "LS"; 1 -> "RS"; else -> "Dial${axisN + 1 - 2}" }
+            axisN++
+            cfg.auxChannels.add(AuxChannel(name = name, kind = "AXIS", axisIndex = i))
+            have += sig
+        }
+        for (group in analyzer.groupButtons()) {
+            val sig = "buttons:" + group.joinToString(",")
+            if (sig in have) continue
+            val name = switchName(btnN++)
+            cfg.auxChannels.add(
+                AuxChannel(name = name, kind = "BUTTONS", buttons = ArrayList(group))
+            )
+            have += sig
+        }
+    }
+
+    private fun signature(a: AuxChannel): String =
+        if (a.kind == "BUTTONS") "buttons:" + a.buttons.joinToString(",") else "axis:${a.axisIndex}"
+
+    private fun switchName(n: Int): String {
+        val letters = "ABCDEFGH"
+        return if (n < letters.length) "S${letters[n]}" else "SW${n + 1}"
+    }
+
+    /** Evaluate one configured AUX channel into its per-frame state. */
+    private fun evalAux(a: AuxChannel): AuxState {
+        if (a.kind == "BUTTONS") {
+            var pos = -1
+            for (p in a.buttons.indices) {
+                val bi = a.buttons[p]
+                if (bi in lastButtons.indices && lastButtons[bi].toInt() != 0) { pos = p; break }
+            }
+            val n = a.buttons.size
+            val norm = if (n <= 1) (if (pos >= 0) 1f else 0f)
+            else (pos.toFloat() / (n - 1)) * 2f - 1f
+            return AuxState(
+                name = a.name,
+                value = if (a.reversed) -norm else norm,
+                position = pos,
+                positionCount = n,
+                kind = "BUTTONS",
+                source = "Btns " + a.buttons.joinToString(",") { "${it + 1}" },
+                calibrated = true,
+            )
+        }
+        // AXIS
+        if (a.axisIndex !in lastAxes.indices) {
+            return AuxState(a.name, 0f, -1, 0, "AXIS", "Axis -", a.learned)
+        }
+        // Reuse the centered normalizer with the aux channel's own endpoints.
+        val sc = SlotCalib(
+            axisIndex = a.axisIndex, reversed = a.reversed,
+            rawMin = a.rawMin, rawMid = a.rawMid, rawMax = a.rawMax,
+            deadzone = a.deadzone, learned = a.learned,
+        )
+        val v = ChannelNormalizer.centered(lastAxes[a.axisIndex], sc)
+        val levels = analyzer.levelCount(a.axisIndex)
+        return AuxState(
+            name = a.name,
+            value = v,
+            position = -1,
+            positionCount = if (levels <= 3) levels else 0,
+            kind = "AXIS",
+            source = "Axis ${a.axisIndex + 1}",
+            calibrated = a.learned,
+        )
     }
 
     /**

@@ -7,6 +7,10 @@
 package dev.fpv.client
 
 import dev.fpv.client.gui.FpvConfigScreen
+import dev.fpv.replay.CinematicExport
+import dev.fpv.replay.FlightRecorder
+import dev.fpv.replay.ReplayManager
+import dev.fpv.replay.ReplayScreen
 import dev.fpv.flight.BatteryModel
 import dev.fpv.flight.Defaults
 import dev.fpv.flight.FlightController
@@ -64,6 +68,9 @@ object FpvClient : ClientModInitializer {
 
     private val throttleCurve = ThrottleCurve(config)
 
+    /** Power-response filter state: effective thrust tracks commanded throttle. */
+    private var powerFiltered = 0f
+
     /** Accumulated flight time while engaged, seconds (OSD + logger). */
     var flightTimeSec = 0f
         private set
@@ -75,6 +82,8 @@ object FpvClient : ClientModInitializer {
     private lateinit var toggleKey: KeyMapping
     private lateinit var settingsKey: KeyMapping
     private lateinit var armKey: KeyMapping
+    private lateinit var recordKey: KeyMapping
+    private lateinit var replayKey: KeyMapping
 
     private var lastNanos = 0L
 
@@ -106,6 +115,22 @@ object FpvClient : ClientModInitializer {
                 KeyMapping.Category.MISC,
             )
         )
+        recordKey = KeyBindingHelper.registerKeyBinding(
+            KeyMapping(
+                "key.fpv.record",
+                InputConstants.Type.KEYSYM,
+                GLFW.GLFW_KEY_R,
+                KeyMapping.Category.MISC,
+            )
+        )
+        replayKey = KeyBindingHelper.registerKeyBinding(
+            KeyMapping(
+                "key.fpv.replay",
+                InputConstants.Type.KEYSYM,
+                GLFW.GLFW_KEY_U,
+                KeyMapping.Category.MISC,
+            )
+        )
 
         ClientTickEvents.END_CLIENT_TICK.register(ClientTickEvents.EndTick { mc ->
             while (toggleKey.consumeClick()) {
@@ -115,6 +140,13 @@ object FpvClient : ClientModInitializer {
             while (settingsKey.consumeClick()) {
                 if (mc.screen == null) mc.setScreen(FpvConfigScreen(null))
             }
+            while (recordKey.consumeClick()) {
+                if (FlightRecorder.recording) FlightRecorder.stop() else FlightRecorder.start()
+            }
+            while (replayKey.consumeClick()) {
+                if (mc.screen == null) mc.setScreen(ReplayScreen(null))
+            }
+            FlightRecorder.pollAuxTrigger(input.lastFrame())
             // Key arming is available only when no arm switch is configured.
             if (config.armSwitchAxis < 0) {
                 while (armKey.consumeClick()) {
@@ -186,6 +218,19 @@ object FpvClient : ClientModInitializer {
         )
         if (failsafeLand) throttle = Defaults.FAILSAFE_LAND_THROTTLE
 
+        // Instantaneous power: first-order throttle->thrust response. Higher
+        // instantPower = shorter time constant = snappier power delivery.
+        val af = config.activeAirframe()
+        val tau = (0.08f / af.instantPower.coerceAtLeast(0.05f))
+        val a = (dt / (tau + dt)).coerceIn(0f, 1f)
+        powerFiltered += a * (throttle - powerFiltered)
+        throttle = powerFiltered
+
+        // Armed idle floor (normal mode only): never spool below minThrottle.
+        if (flight.ready && armed && !config.reversible3D && !flight.crashRecovering) {
+            throttle = throttle.coerceAtLeast(af.minThrottle)
+        }
+
         battery.update(throttle, dt)
 
         if (flight.ready) flightTimeSec += dt
@@ -211,11 +256,27 @@ object FpvClient : ClientModInitializer {
             logger.close()
         }
 
+        // Replay transport advances by real time (the offline exporter drives the
+        // cursor itself, so we skip the real-time advance while it runs).
+        if (!CinematicExport.exporting) ReplayManager.update(dt)
+
+        // Flight-data recorder: only while actually flying, with no GUI open and
+        // not already inside a replay session (never record a replay).
+        if (flight.ready && mc.screen == null &&
+            !ReplayManager.active && !CinematicExport.exporting
+        ) {
+            FlightRecorder.feed(mc, channels, dt)
+        }
+
         val p = mc.player
         if (p == null || !flight.ready) return
 
         // Pause the drone while a GUI/inventory is open, but keep polling above.
         if (mc.screen != null) return
+
+        // During an active replay, freeze live flight control; the virtual camera
+        // is driven by ReplayManager instead.
+        if (ReplayManager.active) return
 
         flight.step(channels, dt, throttle)
         // Crash recovery holds a leveling override and cuts the throttle.

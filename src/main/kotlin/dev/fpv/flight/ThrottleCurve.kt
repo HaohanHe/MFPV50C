@@ -75,7 +75,22 @@ class ThrottleCurve(private val cfg: FpvConfig) {
         } else {
             val shaped = lookup(raw)
             val boost = if (cfg.throttleBoostEnabled) boost(shaped, dt) else 0f
-            (shaped + boost).coerceIn(0f, 1f)
+            (multiPointGain(raw) * (shaped + boost)).coerceIn(0f, 1f)
+        }
+    }
+
+    /**
+     * Multi-point throttle gain: linear piecewise interpolation through
+     * (0,thrLow) -> (0.5,thrMid) -> (1,thrHigh) from the active airframe.
+     * Shapes low/mid/high throttle independently (default ~1 = neutral).
+     */
+    private fun multiPointGain(x: Float): Float {
+        val af = cfg.activeAirframe()
+        val t = x.coerceIn(0f, 1f)
+        return if (t <= 0.5f) {
+            af.thrLow + (af.thrMid - af.thrLow) * (t / 0.5f)
+        } else {
+            af.thrMid + (af.thrHigh - af.thrMid) * ((t - 0.5f) / 0.5f)
         }
     }
 

@@ -30,6 +30,9 @@ object GateRenderer {
 
     fun register() {
         WorldRenderEvents.AFTER_ENTITIES.register { ctx ->
+            // Master race switch: when off, render no gates / start-finish /
+            // landing zone / ghost into the world.
+            if (!RaceManager.racingEnabled()) return@register
             val mc = Minecraft.getInstance()
             if (mc.level == null) return@register
             val cam = mc.gameRenderer.mainCamera

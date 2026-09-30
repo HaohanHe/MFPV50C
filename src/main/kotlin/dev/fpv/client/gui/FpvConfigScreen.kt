@@ -61,6 +61,10 @@ class FpvConfigScreen(private val parent: Screen?) :
             buildAdvancedPage()
             return
         }
+        if (page == 2) {
+            buildAirframePage()
+            return
+        }
         val w = width
         // Device picker (full width).
         deviceBtn = Button.builder(Component.literal("")) { cycleDevice() }
@@ -133,8 +137,8 @@ class FpvConfigScreen(private val parent: Screen?) :
             )
         }
 
-        // Bottom row: reset / advanced / race track / OSD editor (equal widths).
-        val bottomN = 4
+        // Bottom row: reset / advanced / race track / OSD editor / replays.
+        val bottomN = 5
         val bottomGap = 4
         val bottomTotal = w - 24
         val bottomW = (bottomTotal - (bottomN - 1) * bottomGap) / bottomN
@@ -160,6 +164,11 @@ class FpvConfigScreen(private val parent: Screen?) :
             Button.builder(Component.translatable("gui.fpv.osd_editor")) {
                 minecraft.setScreen(OsdEditorScreen(this))
             }.bounds(bottomAt(3), Y_RESET, bottomW, 18).build()
+        )
+        addRenderableWidget(
+            Button.builder(Component.translatable("gui.fpv.replays")) {
+                minecraft.setScreen(dev.fpv.replay.ReplayScreen(this))
+            }.bounds(bottomAt(4), Y_RESET, bottomW, 18).build()
         )
         addRenderableWidget(
             Button.builder(Component.translatable("gui.fpv.done")) { onClose() }
@@ -330,6 +339,11 @@ class FpvConfigScreen(private val parent: Screen?) :
             { cfg.allowTranslationMultiplayer }, { cfg.allowTranslationMultiplayer = it })
         y += rowH
 
+        // Race master switch (default off = single-player freestyle).
+        addToggle(rightX, y, colW, "gui.fpv.race_enabled",
+            { cfg.race?.raceEnabled ?: false }, { cfg.race?.raceEnabled = it })
+        y += rowH
+
         // Throttle limit: type (OFF/SCALE/CLIP) and percent.
         addThrottleLimitType(rightX, y, colW)
         y += rowH
@@ -339,17 +353,199 @@ class FpvConfigScreen(private val parent: Screen?) :
             intArrayOf(50, 75, 90, 100), "%d%%")
         y += rowH
 
+        // Airframe physics page nav.
+        addRenderableWidget(
+            Button.builder(Component.translatable("gui.fpv.airframe")) {
+                page = 2
+                clearWidgets()
+                init()
+            }.bounds(rightX, y, colW, 18).build()
+        )
+        y += rowH
+
         addRenderableWidget(
             Button.builder(Component.translatable("gui.fpv.back")) {
                 page = 0
                 clearWidgets()
                 init()
-            }.bounds(rightX, y, colW, 18).build()
+            }.bounds(leftX, y, colW, 18).build()
         )
         addRenderableWidget(
             Button.builder(Component.translatable("gui.fpv.done")) { onClose() }
                 .bounds(width - 100, height - 26, 90, 18).build()
         )
+    }
+
+    // ---- airframe (machine physics) page ----
+    private fun buildAirframePage() {
+        val colW = (width - 36) / 3
+        val c1 = 12
+        val c2 = c1 + colW + 6
+        val c3 = c2 + colW + 6
+        val rowH = 18
+        val af = cfg.activeAirframe()
+
+        // Profile selector (full width top) + New/Copy/Delete.
+        val profBtn = Button.builder(Component.literal(af.name)) {
+            cfg.cycleAirframe(); refreshAirframePage()
+        }.bounds(c1, 24, colW * 3 + 12, 18).build()
+        addRenderableWidget(profBtn)
+        val bW = (colW * 3 + 12) / 3
+        addRenderableWidget(
+            Button.builder(Component.translatable("gui.fpv.airframe_new")) {
+                cfg.newAirframe(); refreshAirframePage()
+            }.bounds(c1, 46, bW, 18).build()
+        )
+        addRenderableWidget(
+            Button.builder(Component.translatable("gui.fpv.airframe_copy")) {
+                cfg.copyActiveAirframe(); refreshAirframePage()
+            }.bounds(c1 + bW, 46, bW, 18).build()
+        )
+        addRenderableWidget(
+            Button.builder(Component.translatable("gui.fpv.airframe_del")) {
+                cfg.deleteActiveAirframe(); refreshAirframePage()
+            }.bounds(c1 + 2 * bW, 46, bW, 18).build()
+        )
+
+        // ---- Col 1: hardware ----
+        var y = 70
+        addCycle(c1, y, colW, "gui.fpv.cam_tilt",
+            { cfg.activeAirframe().cameraTiltDeg }, { cfg.activeAirframe().cameraTiltDeg = it },
+            floatArrayOf(15f, 20f, 25f, 30f, 40f), "%.0f°"); y += rowH
+        addCycleI(c1, y, colW, "gui.fpv.motor_kv",
+            { cfg.activeAirframe().motorKv }, { cfg.activeAirframe().motorKv = it },
+            intArrayOf(1500, 1750, 1900, 2200, 2400), "%d"); y += rowH
+        addCycleI(c1, y, colW, "gui.fpv.cells_s",
+            { cfg.activeAirframe().cellCountS }, { cfg.activeAirframe().cellCountS = it },
+            intArrayOf(0, 4, 5, 6), "%dS"); y += rowH
+        addCycle(c1, y, colW, "gui.fpv.prop_inch",
+            { cfg.activeAirframe().propInch }, { cfg.activeAirframe().propInch = it },
+            floatArrayOf(4.0f, 5.0f, 5.1f, 6.0f), "%.1f\""); y += rowH
+        addCycle(c1, y, colW, "gui.fpv.prop_pitch",
+            { cfg.activeAirframe().propPitch }, { cfg.activeAirframe().propPitch = it },
+            floatArrayOf(3.5f, 4.0f, 4.6f, 5.0f, 5.5f), "%.1f"); y += rowH
+        addCycle(c1, y, colW, "gui.fpv.min_thr",
+            { cfg.activeAirframe().minThrottle }, { cfg.activeAirframe().minThrottle = it },
+            floatArrayOf(0f, 0.03f, 0.055f, 0.08f), "%.1f%%"); y += rowH
+        addCycle(c1, y, colW, "gui.fpv.thr_low",
+            { cfg.activeAirframe().thrLow }, { cfg.activeAirframe().thrLow = it },
+            floatArrayOf(0.90f, 0.95f, 1.00f, 1.05f), "%.2f"); y += rowH
+        addCycle(c1, y, colW, "gui.fpv.thr_mid",
+            { cfg.activeAirframe().thrMid }, { cfg.activeAirframe().thrMid = it },
+            floatArrayOf(0.90f, 0.95f, 1.00f, 1.05f), "%.2f"); y += rowH
+        addCycle(c1, y, colW, "gui.fpv.thr_high",
+            { cfg.activeAirframe().thrHigh }, { cfg.activeAirframe().thrHigh = it },
+            floatArrayOf(0.95f, 1.00f, 1.05f, 1.10f), "%.2f"); y += rowH
+
+        // ---- Col 2: behavior + advanced physics ----
+        y = 70
+        addToggle(c2, y, colW, "gui.fpv.propwash",
+            { cfg.activeAirframe().propwashEnabled }, { cfg.activeAirframe().propwashEnabled = it }); y += rowH
+        addPidBehaviorRow(c2, y, colW); y += rowH
+        addCycle(c2, y, colW, "gui.fpv.gravity",
+            { cfg.activeAirframe().gravity }, { cfg.activeAirframe().gravity = it },
+            floatArrayOf(9.81f, 9.82f, 10.5f), "%.2f"); y += rowH
+        addCycle(c2, y, colW, "gui.fpv.instant_power",
+            { cfg.activeAirframe().instantPower }, { cfg.activeAirframe().instantPower = it },
+            floatArrayOf(0.40f, 0.55f, 0.65f, 0.80f, 1.00f), "%.2f"); y += rowH
+        addCycle(c2, y, colW, "gui.fpv.air_drag",
+            { cfg.activeAirframe().airDrag }, { cfg.activeAirframe().airDrag = it },
+            floatArrayOf(0.25f, 0.33f, 0.40f, 0.50f, 0.65f), "%.2f"); y += rowH
+        addCycle(c2, y, colW, "gui.fpv.air_grip",
+            { cfg.activeAirframe().airGrip }, { cfg.activeAirframe().airGrip = it },
+            floatArrayOf(0.60f, 0.75f, 0.85f, 1.00f), "%.2f"); y += rowH
+        addCycle(c2, y, colW, "gui.fpv.rel_airspeed",
+            { cfg.activeAirframe().relativeAirspeed }, { cfg.activeAirframe().relativeAirspeed = it },
+            floatArrayOf(0.80f, 0.90f, 1.00f, 1.15f), "%.2f"); y += rowH
+        addCycle(c2, y, colW, "gui.fpv.mass",
+            { cfg.activeAirframe().massKg }, { cfg.activeAirframe().massKg = it },
+            floatArrayOf(0.40f, 0.55f, 0.65f, 0.75f, 0.95f, 1.00f), "%.2fkg"); y += rowH
+        addCycle(c2, y, colW, "gui.fpv.max_thrust",
+            { cfg.activeAirframe().maxThrustPerMotorN }, { cfg.activeAirframe().maxThrustPerMotorN = it },
+            floatArrayOf(20f, 25f, 30f, 35f, 40f, 45f), "%.0fN"); y += rowH
+
+        // ---- Col 3: inertia / angular drag / CG ----
+        y = 70
+        addCycle(c3, y, colW, "gui.fpv.i_pitch",
+            { cfg.activeAirframe().inertiaXX }, { cfg.activeAirframe().inertiaXX = it },
+            floatArrayOf(0.0015f, 0.0022f, 0.0030f, 0.0040f), "%.4f"); y += rowH
+        addCycle(c3, y, colW, "gui.fpv.i_yaw",
+            { cfg.activeAirframe().inertiaYY }, { cfg.activeAirframe().inertiaYY = it },
+            floatArrayOf(0.0025f, 0.0035f, 0.0045f, 0.0060f), "%.4f"); y += rowH
+        addCycle(c3, y, colW, "gui.fpv.i_roll",
+            { cfg.activeAirframe().inertiaZZ }, { cfg.activeAirframe().inertiaZZ = it },
+            floatArrayOf(0.0012f, 0.0018f, 0.0025f, 0.0035f), "%.4f"); y += rowH
+        addCycle(c3, y, colW, "gui.fpv.ad_pitch",
+            { cfg.activeAirframe().angularDragXX }, { cfg.activeAirframe().angularDragXX = it },
+            floatArrayOf(0.20f, 0.35f, 0.44f, 0.60f, 0.90f), "%.2f"); y += rowH
+        addCycle(c3, y, colW, "gui.fpv.ad_yaw",
+            { cfg.activeAirframe().angularDragYY }, { cfg.activeAirframe().angularDragYY = it },
+            floatArrayOf(0.40f, 0.55f, 0.70f, 1.00f, 1.40f), "%.2f"); y += rowH
+        addCycle(c3, y, colW, "gui.fpv.ad_roll",
+            { cfg.activeAirframe().angularDragZZ }, { cfg.activeAirframe().angularDragZZ = it },
+            floatArrayOf(0.20f, 0.28f, 0.36f, 0.50f, 0.80f), "%.2f"); y += rowH
+        addCycle(c3, y, colW, "gui.fpv.cg_x",
+            { cfg.activeAirframe().cgOffsetX }, { cfg.activeAirframe().cgOffsetX = it },
+            floatArrayOf(-0.05f, -0.02f, 0f, 0.02f, 0.05f), "%+.2f"); y += rowH
+        addCycle(c3, y, colW, "gui.fpv.cg_y",
+            { cfg.activeAirframe().cgOffsetY }, { cfg.activeAirframe().cgOffsetY = it },
+            floatArrayOf(-0.05f, -0.02f, 0f, 0.02f, 0.05f), "%+.2f"); y += rowH
+
+        addRenderableWidget(
+            Button.builder(Component.translatable("gui.fpv.back")) {
+                page = 1
+                clearWidgets()
+                init()
+            }.bounds(c1, height - 26, colW * 3 / 2, 18).build()
+        )
+        addRenderableWidget(
+            Button.builder(Component.translatable("gui.fpv.done")) { onClose() }
+                .bounds(width - 100, height - 26, 90, 18).build()
+        )
+    }
+
+    /** pidBehavior cycle: PERFECT (no override) -> known TuningPreset ids. */
+    private fun addPidBehaviorRow(x: Int, y: Int, w: Int) {
+        lateinit var btn: Button
+        val opts = listOf("PERFECT", "racing", "beginner", "cinematic")
+        fun label(): String = Component.translatable(
+            "gui.fpv.pid_behavior",
+            Component.translatable("gui.fpv.pidb_" + cfg.activeAirframe().pidBehavior.lowercase()),
+        ).string
+        btn = Button.builder(Component.literal("")) {
+            val cur = cfg.activeAirframe().pidBehavior
+            val i = opts.indexOf(cur).let { if (it < 0) 0 else it }
+            cfg.activeAirframe().pidBehavior = opts[(i + 1) % opts.size]
+            cfg.applyPidBehavior()
+            btn.message = Component.literal(label())
+        }.bounds(x, y, w, 18).build()
+        btn.message = Component.literal(label())
+        addRenderableWidget(btn)
+    }
+
+    private var y2 = 0
+
+    /** Rebuild the airframe page after create/copy/delete/switch. */
+    private fun refreshAirframePage() {
+        clearWidgets()
+        init()
+    }
+
+    /** Live-derived performance strip (bottom of the airframe page). */
+    private fun drawDerivedPerf(g: GuiGraphics) {
+        val af = cfg.activeAirframe()
+        val top = dev.fpv.flight.AirframeDerivation.topSpeedKmh(af)
+        val thr = dev.fpv.flight.AirframeDerivation.totalThrustKg(af)
+        val aero = dev.fpv.flight.AirframeDerivation.aeroIndex(af)
+        val line = Component.translatable(
+            "gui.fpv.derived",
+            String.format("%.0f", top),
+            String.format("%.0f", af.massKg * 1000f),
+            String.format("%.2f", thr),
+            String.format("%.2f", aero),
+            af.physicsModelVersion,
+        )
+        g.drawCenteredString(font, line, width / 2, height - 44, 0x55FF55)
     }
 
     private fun addToggle(x: Int, y: Int, w: Int, key: String,
@@ -463,8 +659,9 @@ class FpvConfigScreen(private val parent: Screen?) :
     // ---- rendering ----
     override fun render(g: GuiGraphics, mouseX: Int, mouseY: Int, delta: Float) {
         renderBackground(g, mouseX, mouseY, delta)
-        if (page == 1) {
+        if (page == 1 || page == 2) {
             g.drawCenteredString(font, Component.translatable("gui.fpv.config"), width / 2, 6, 0xFFFFFF)
+            if (page == 2) drawDerivedPerf(g)
             super.render(g, mouseX, mouseY, delta)
             return
         }
@@ -489,6 +686,29 @@ class FpvConfigScreen(private val parent: Screen?) :
         g.drawString(font, Component.translatable("gui.fpv.mode_switch_label"), 12, y + 5, 0xAAAAAA)
         y += ROW_H
         g.drawString(font, Component.translatable("gui.fpv.arm_label"), 12, y + 5, 0xAAAAAA)
+
+        // Data-driven AUX channels (sliders/dials/switches), live values.
+        y += ROW_H
+        g.drawString(font, Component.translatable("gui.fpv.aux_header"), 12, y + 5, 0xFF88CCFF.toInt())
+        y += ROW_H
+        val auxList = last.auxChannels
+        if (auxList.isEmpty()) {
+            g.drawString(font, Component.translatable("gui.fpv.aux_empty"), 12, y + 5, 0x888888)
+        } else {
+            for (a in auxList) {
+                if (y > height - 60) break
+                g.drawString(font, Component.literal(a.name), 12, y + 5, 0xFFFFFF)
+                g.drawString(font, Component.literal(a.source), 70, y + 5, 0x888888)
+                if (a.kind == "BUTTONS") {
+                    val pos = if (a.position < 0) "-" else "${a.position + 1}/${a.positionCount}"
+                    g.drawString(font, Component.literal("POS $pos"), barX + 40, y + 5, 0x55FF55)
+                } else {
+                    drawBar(g, barX, y + 6, barW, a.value, false)
+                    g.drawString(font, String.format("%+.2f", a.value), barX + barW + 3, y + 5, 0x55FF55)
+                }
+                y += ROW_H
+            }
+        }
 
         // Data-driven stick crosshairs (raw values via slot bindings).
         drawSlotCross(g, width / 2 - 55, CROSS_CY, raw, StickSlot.LH, StickSlot.LV)

@@ -28,6 +28,13 @@ class FlightController(val cfg: FpvConfig = FpvConfig()) {
     /** Latest measured body rates [pitch, roll, yaw], dps (for telemetry). */
     val bodyRates = FloatArray(3)
 
+    /**
+     * Estimated ACTUAL body rates after the first-order inertia/angularDrag
+     * tracking (dps). The attitude is integrated from this, not directly from
+     * the commanded rates, so inertia/angularDrag genuinely shape tracking.
+     */
+    private val trackedRates = FloatArray(3)
+
     private val spRoll = Pt3(cfg.setpointCutoffHz)
     private val spPitch = Pt3(cfg.setpointCutoffHz)
     private val spYaw = Pt3(cfg.setpointCutoffHz)
@@ -63,6 +70,9 @@ class FlightController(val cfg: FpvConfig = FpvConfig()) {
     private val angle = AngleController()
     private var modeSwitchWasHigh = false
 
+    /** Simulation clock, seconds (drives propwash oscillation phase). */
+    private var simTime = 0f
+
     /**
      * Enter FPV mode and seed the attitude from the player's current look
      * direction. Matches the camera rotation form:
@@ -75,6 +85,7 @@ class FlightController(val cfg: FpvConfig = FpvConfig()) {
             0f,
         )
         angle.measuredDps.fill(0f)
+        trackedRates.fill(0f)
         angle.rebaseline(attitude)
         currentMode = cfg.flightMode
         modeSwitchWasHigh = false
@@ -244,12 +255,50 @@ class FlightController(val cfg: FpvConfig = FpvConfig()) {
         targetRollDeg = angle.targetRollDeg
         targetPitchDeg = angle.targetPitchDeg
 
+        // ---- Airframe inertia / angularDrag first-order body-rate tracking ----
+        // Plant: I*dω/dt = b*(ωcmd - ω) => ω follows the command with time
+        // constant tau = I / angularDrag. Default tau is ~5 ms (near-instant,
+        // keeps the acro feel); larger I / smaller b -> heavier, damped,
+        // laggier handling. bodyRates (below) is measured from this actual motion.
+        val af = cfg.activeAirframe()
+        for (b in BodyAxis.entries) {
+            val tau = af.tauSec(b)
+            val alpha = (dt / (tau + dt)).coerceIn(0f, 1f)
+            trackedRates[b.index] += alpha * (cmd[b.index] - trackedRates[b.index])
+        }
+        // Stylised thrust-arm coupling from the CG offset. Thrust acts along
+        // body -Z at offset r=(x,y,z): torque τ = r x F = (-y*T, x*T, 0).
+        // Default cg offset is 0, so this is a no-op until the pilot moves it.
+        // (Full 6-DOF moment arm / aerodynamic moments are a later,真机-tuned step.)
+        val T = af.totalThrustN(throttleCmd)
+        val tauX = -af.cgOffsetY * T
+        val tauY = af.cgOffsetX * T
+        for (b in BodyAxis.entries) {
+            val axisTorque = b.axis.x * tauX + b.axis.y * tauY // roll axis torque component = 0
+            val i = when (b) {
+                BodyAxis.PITCH -> af.inertiaXX
+                BodyAxis.YAW -> af.inertiaYY
+                BodyAxis.ROLL -> af.inertiaZZ
+            }
+            trackedRates[b.index] += Math.toDegrees((axisTorque / i.coerceAtLeast(1e-6f)).toDouble()).toFloat() * dt
+        }
+
+        // Propwash: small high-frequency plant disturbance on roll/pitch that the
+        // PID rate loop sees and partially rejects (hence it couples to the PID).
+        // Amplitude/frequency are engineering starting values; default off.
+        if (af.propwashEnabled) {
+            simTime += dt
+            trackedRates[0] += (18f * kotlin.math.sin(2.0 * Math.PI * 27.0 * simTime)).toFloat()
+            trackedRates[1] += (14f * kotlin.math.sin(2.0 * Math.PI * 31.0 * simTime + 0.7)).toFloat()
+        }
+
         // Body-frame post-multiply integration; axis vectors from BodyAxis.
+        // Integrate the tracked (actual) rates, not the commanded ones.
         val oldAtt = Quaternionf(attitude)
         val deltaQ = Quaternionf()
         for (b in BodyAxis.entries) {
             val a = b.axis
-            deltaQ.mul(Quaternionf().rotateAxis(toRad(cmd[b.index] * dt), a.x, a.y, a.z))
+            deltaQ.mul(Quaternionf().rotateAxis(toRad(trackedRates[b.index] * dt), a.x, a.y, a.z))
         }
         attitude.mul(deltaQ).normalize()
 

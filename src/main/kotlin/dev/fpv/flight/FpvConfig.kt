@@ -8,6 +8,7 @@ package dev.fpv.flight
 import com.google.gson.GsonBuilder
 import dev.fpv.client.osd.OsdElement
 import dev.fpv.client.osd.OsdLayout
+import dev.fpv.input.AuxChannel
 import dev.fpv.input.SlotCalib
 import dev.fpv.input.StickSlot
 import net.fabricmc.loader.api.FabricLoader
@@ -37,6 +38,13 @@ class BatteryConfig {
 
     /** Per-cell voltage that raises the OSD critical (published 3.30V). */
     var criticalCellV: Float = Defaults.VBAT_CRITICAL_CELL
+
+    fun copy(): BatteryConfig = BatteryConfig().also {
+        it.cellCount = cellCount
+        it.packCapacityMah = packCapacityMah
+        it.warningCellV = warningCellV
+        it.criticalCellV = criticalCellV
+    }
 }
 
 /** RX-link failsafe parameters. */
@@ -113,6 +121,15 @@ class ThrottleLimitConfig {
  *  dev.fpv.race.F9URules for source clauses. New fields default via Gson; old
  *  configs are repaired by FpvConfig.migrate(). */
 class RaceConfig {
+    /**
+     * Master switch for ALL race logic (gate detection / lap timing /
+     * time limit / landing-zone validation / ghost / gate rendering / HUD).
+     * Default false: first flight is plain single-player freestyle (ACRO),
+     * nothing race-related activates and no race calibration is required.
+     * Race data structures stay fully intact; turn this on to race.
+     */
+    var raceEnabled: Boolean = false
+
     /** Default gate opening size, blocks (1 m ~= 1 block). */
     var gateWidth = 3f
     var gateHeight = 3f
@@ -144,6 +161,54 @@ class RaceConfig {
 
     /** Enable per-gate sector splits. */
     var sectorsEnabled = true
+}
+
+/** Recording + playback knobs for the data-driven replay system (dev.fpv.replay). */
+class ReplayConfig {
+    /** "FIXED" = decimate to [sampleRateHz]; "FRAME" = write every rendered frame. */
+    var recordingMode: String = "FIXED"
+
+    /** Fixed sampling rate when recordingMode = FIXED (Hz, 25..240). */
+    var sampleRateHz: Float = 120f
+
+    /** Raw AUX axis that toggles recording (rising edge); -1 = keyboard/GUI only. */
+    var recordAuxAxis: Int = -1
+
+    /** Last transport speed chosen in the replay screen (0.25..4). */
+    var lastSpeed: Float = 1f
+
+    /** "FPV", "CHASE" or "FREE". */
+    var lastView: String = "FPV"
+}
+
+/** Offline cinematic export knobs (dev.fpv.replay.CinematicExport). */
+class ExportConfig {
+    /** "16:9", "9:16", "2.35:1", "2.39:1", "21:9". */
+    var aspect: String = "2.39:1"
+
+    /** "720p", "1080p", "1440p", "2160p" canvas height family. */
+    var resolution: String = "1080p"
+
+    /** Output frames per second. */
+    var fps: Int = 24
+
+    /** Motion-blur sub-samples per output frame (4..8; 180-degree shutter). */
+    var motionBlurSamples: Int = 4
+
+    /** Shutter angle in degrees; 180 = classic half-frame exposure. */
+    var shutterAngleDeg: Float = 180f
+
+    /** Bake black bars to the target aspect in the offscreen buffer. */
+    var letterbox: Boolean = true
+
+    /** "mp4" (libx264/yuv420p) or "mkv". */
+    var container: String = "mp4"
+
+    /** Empty = look up "ffmpeg" on PATH; otherwise an absolute executable path. */
+    var ffmpegPath: String = ""
+
+    /** Chase camera follow distance, blocks. */
+    var chaseDistance: Float = 2.5f
 }
 
 class FpvConfig {
@@ -246,6 +311,20 @@ class FpvConfig {
     var pid: PidConfig? = PidConfig()
     var throttleLimit: ThrottleLimitConfig? = ThrottleLimitConfig()
     var race: RaceConfig? = RaceConfig()
+    var replay: ReplayConfig? = ReplayConfig()
+    var export: ExportConfig? = ExportConfig()
+
+    // ---- Airframe (machine) profiles: data-driven physics ----
+    /**
+     * All tunable machine profiles. The active one is consumed by the real
+     * translational + rotational physics; see AirframeProfile for the field
+     * -> consumer map. Built-ins: a balanced freestyle starting point and an
+     * F9U-class reference profile constrained by the F9U hardware rules.
+     */
+    var airframes: MutableList<AirframeProfile> = defaultAirframes()
+
+    /** Name of the profile currently driving physics. */
+    var activeAirframeName: String = airframes.first().name
 
     /**
      * Persisted OSD layout (enabled flags + pixel positions). The OSD editor
@@ -255,6 +334,13 @@ class FpvConfig {
 
     /** Raw aux axis for heading-adjust (re-center headfree heading); -1 = off. */
     var headAdjustAxis = -1
+
+    /**
+     * Data-driven AUX channels beyond the 4 gimbals (sliders/dials/knobs and
+     * grouped multi-position switches). Grows at runtime as the USB device
+     * exposes more axes/buttons; persisted so user names/bindings survive.
+     */
+    var auxChannels: MutableList<AuxChannel> = mutableListOf()
 
     // ---- Translational motion multiplayer gating ----
     /** Master enable for client-side thrust/drag translation. */
@@ -269,6 +355,59 @@ class FpvConfig {
     /** True when every physical slot has a raw axis binding. */
     fun isCalibrated(): Boolean = slotCalib.all { it.axisIndex >= 0 }
 
+    // ---- Airframe profile access ----
+    /** The profile driving physics right now (falls back to the first one). */
+    fun activeAirframe(): AirframeProfile =
+        airframes.firstOrNull { it.name == activeAirframeName } ?: airframes.first()
+
+    /** Battery to use: the active airframe's pack if it defines one, else the shared pack. */
+    fun activeBattery(): BatteryConfig = activeAirframe().battery ?: (battery ?: BatteryConfig())
+
+    /** Cycle to the next profile in the list (wraps). */
+    fun cycleAirframe() {
+        val i = airframes.indexOfFirst { it.name == activeAirframeName }
+        if (airframes.isEmpty()) return
+        activeAirframeName = airframes[(i + 1).mod(airframes.size)].name
+        applyPidBehavior()
+    }
+
+    /**
+     * Apply the active profile's pidBehavior as a one-shot rate preset.
+     * "PERFECT"/"" leaves current rates untouched; otherwise it names a
+     * TuningPreset (racing/beginner/cinematic) applied via the existing table.
+     */
+    fun applyPidBehavior() {
+        val preset = TuningPreset.byId(activeAirframe().pidBehavior) ?: return
+        preset.apply(this)
+    }
+
+    /** Create an empty profile copied from the active one and activate it. */
+    fun copyActiveAirframe(): AirframeProfile {
+        val src = activeAirframe()
+        val n = airframes.count { it.name.startsWith(src.name) }
+        val copy = src.copy().apply { name = src.name + " " + (if (n == 0) "copy" else "copy$n"); battery = src.battery?.copy() }
+        airframes.add(copy)
+        activeAirframeName = copy.name
+        return copy
+    }
+
+    /** Create a fresh default-style profile. */
+    fun newAirframe(): AirframeProfile {
+        val p = AirframeProfile().apply { name = "Custom " + (airframes.size + 1) }
+        airframes.add(p)
+        activeAirframeName = p.name
+        return p
+    }
+
+    /** Delete the active profile (never the last one). */
+    fun deleteActiveAirframe() {
+        if (airframes.size <= 1) return
+        val i = airframes.indexOfFirst { it.name == activeAirframeName }
+        if (i < 0) return
+        airframes.removeAt(i)
+        activeAirframeName = airframes.first().name
+    }
+
     /** Repair missing/short calibration data after loading older JSON. */
     private fun migrate() {
         if (slotCalib.size != StickSlot.entries.size) slotCalib = defaultSlots()
@@ -278,7 +417,15 @@ class FpvConfig {
         if (pid == null) pid = PidConfig()
         if (throttleLimit == null) throttleLimit = ThrottleLimitConfig()
         if (race == null) race = RaceConfig()
+        if (replay == null) replay = ReplayConfig()
+        if (export == null) export = ExportConfig()
         if (osdElements.isEmpty()) osdElements = OsdLayout.defaultLayout()
+        // Older configs predate data-driven airframes.
+        if (airframes.isEmpty()) airframes = defaultAirframes()
+        if (airframes.none { it.name == activeAirframeName })
+            activeAirframeName = airframes.first().name
+        // auxChannels has a non-null initializer; Gson leaves it empty for
+        // older configs that predate the data-driven AUX list.
     }
 
     // ---- Persistence ----
@@ -292,6 +439,60 @@ class FpvConfig {
 
         private fun defaultSlots(): MutableList<SlotCalib> =
             StickSlot.entries.map { SlotCalib() }.toMutableList()
+
+        /**
+         * Built-in machine profiles. The first one is the default freestyle
+         * ship (engineering starting values; calibrated so full-throttle thrust
+         * accel + quadratic drag reproduce the legacy THRUST_POWER / DRAG_K
+         * feel). The second is an "F9U reference" ship whose hard limits come
+         * straight from the F9U rule book (see H_hardware in data-f9u-rules.json).
+         */
+        private fun defaultAirframes(): MutableList<AirframeProfile> {
+            val freestyle = AirframeProfile().apply {
+                name = "Freestyle 5in"
+                comment = "Balanced freestyle starting point. Engineering values, not an OEM default; tuned so t=1 thrust accel ~= legacy THRUST_POWER=1.1 blocks/tick and dragK=0.015."
+                massKg = 0.65f
+                inertiaXX = 0.0022f; inertiaYY = 0.0035f; inertiaZZ = 0.0018f
+                motorCount = 4; maxThrustPerMotorN = 35.0f
+                thrustLinear = 1.0f; thrustQuad = 0.0f
+                propInch = 5.1f; propPitch = 4.6f; motorKv = 1900
+                cameraTiltDeg = 25f; minThrottle = 0.055f
+                thrLow = 0.95f; thrMid = 0.95f; thrHigh = 1.05f
+                gravity = 9.81f; instantPower = 0.65f
+                airDrag = 0.40f; airGrip = 0.85f; relativeAirspeed = 1.00f
+                propwashEnabled = false; pidBehavior = "PERFECT"
+                linearDrag = 0.0f; quadraticDrag = 0.015f
+                angularDragXX = 0.44f; angularDragYY = 0.70f; angularDragZZ = 0.36f
+                cgOffsetX = 0f; cgOffsetY = 0f; cgOffsetZ = 0f
+            }
+            val f9u = AirframeProfile().apply {
+                name = "F9U reference 6in"
+                comment = ("Within F9U hardware limits: mass<=1.0kg [FAI C.1.1 / TWG 2.1], " +
+                    "prop<=6in [FAI Annex C.1 / H.propeller_max_inches], up to 6S @<=4.25V/cell " +
+                    "[FAI C.1.2 / TWG 2.2]. Thrust/inertia/drag are CLASS ESTIMATES, not rulebook " +
+                    "numbers -- to be tuned on a real model.")
+                massKg = 0.95f
+                inertiaXX = 0.0030f; inertiaYY = 0.0045f; inertiaZZ = 0.0025f
+                motorCount = 4; maxThrustPerMotorN = 30.0f
+                thrustLinear = 1.0f; thrustQuad = 0.05f
+                propInch = 6.0f; propPitch = 5.0f; motorKv = 1900; cellCountS = 6
+                cameraTiltDeg = 30f; minThrottle = 0.06f
+                thrLow = 0.95f; thrMid = 0.95f; thrHigh = 1.05f
+                gravity = 9.82f; instantPower = 0.70f
+                airDrag = 0.45f; airGrip = 0.85f; relativeAirspeed = 1.00f
+                propwashEnabled = false; pidBehavior = "racing"
+                linearDrag = 0.0f; quadraticDrag = 0.018f
+                angularDragXX = 0.50f; angularDragYY = 0.75f; angularDragZZ = 0.42f
+                cgOffsetX = 0f; cgOffsetY = 0f; cgOffsetZ = 0f
+                battery = BatteryConfig().apply {
+                    cellCount = 6            // F9U allows up to 6S
+                    packCapacityMah = 1300
+                    warningCellV = 3.50f
+                    criticalCellV = 3.30f
+                }
+            }
+            return mutableListOf(freestyle, f9u)
+        }
 
         private fun configPath(): Path =
             FabricLoader.getInstance().configDir.resolve("fpvcraft.json")

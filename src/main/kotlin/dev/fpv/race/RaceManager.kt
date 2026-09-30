@@ -66,6 +66,15 @@ object RaceManager {
     private val cfg: FpvConfig get() = FpvClient.config
     private fun race() = cfg.race
 
+    /**
+     * Master race gate: when false (the default) NO gate detection, timing,
+     * time limit, landing-zone check, ghost recording/replay, gate rendering
+     * or race HUD runs. The data structures and track editor stay intact; the
+     * pilot flies plain single-player freestyle immediately, with no race
+     * calibration required.
+     */
+    fun racingEnabled(): Boolean = race()?.raceEnabled == true
+
     private fun requiredLaps(): Int = race()?.requiredLaps ?: F9URules.REQUIRED_LAPS
     private fun timeLimitNs(): Long =
         ((race()?.timeLimitSec ?: F9URules.TIME_LIMIT_SEC).toLong()) * 1_000_000_000L
@@ -113,6 +122,13 @@ object RaceManager {
 
     fun onFrame(mc: Minecraft, dt: Float) {
         val player = mc.player
+        // Master switch off: no detection / clock / ghost. Drop any active heat
+        // back to IDLE so a disabled config never leaves a stale timer running.
+        if (!racingEnabled()) {
+            if (phase != RacePhase.IDLE) reset()
+            lastPos = null; ghostPos = null; ghostAttitude = null
+            return
+        }
         if (player == null) { lastPos = null; ghostPos = null; return }
         val eye = player.getEyePosition()
         val prev = lastPos
@@ -330,6 +346,7 @@ object RaceManager {
     // HUD
     // ------------------------------------------------------------------
     fun drawHud(ctx: GuiGraphics) {
+        if (!racingEnabled()) return
         val mc = Minecraft.getInstance()
         val font = mc.font
         val sw = mc.window.guiScaledWidth

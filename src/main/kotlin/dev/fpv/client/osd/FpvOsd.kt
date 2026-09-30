@@ -42,6 +42,26 @@ object FpvOsd {
         /** Look up a persisted layout element by id. */
         fun el(id: String): OsdElement? = cfg.osdElements.firstOrNull { it.id == id }
 
+        // ---- Recording / replay status (always visible when active) ----
+        if (dev.fpv.replay.FlightRecorder.recording) {
+            val f = dev.fpv.replay.FlightRecorder
+            val blink = (System.currentTimeMillis() / 500) % 2 == 0L
+            val mark = if (blink) "\u25CF" else "\u25CB"
+            ctx.drawString(
+                font,
+                "$mark REC  T+${formatSec(f.recordedSec)}  n=${f.sampleCount}",                4, sh - 12, 0xFFFF3333.toInt(), true,
+            )
+        }
+        if (dev.fpv.replay.ReplayManager.active) {
+            val rm = dev.fpv.replay.ReplayManager
+            ctx.drawString(
+                font,
+                "REPLAY x${String.format("%.2f", rm.speed)} ${rm.view}  " +
+                    rm.formatTime(rm.cursorSec),
+                sw - 150, 4, 0xFFFF55, true,
+            )
+        }
+
         // Guidance while the player is trying to fly but cannot yet.
         if (p.isFallFlying && !flight.ready) {
             when {
@@ -172,5 +192,10 @@ object FpvOsd {
                     ctx.drawCenteredString(font, "RX LOST", cx, cy + 14, YELLOW_FILL)
             }
         }
+    }
+
+    private fun formatSec(s: Float): String {
+        val v = s.toInt()
+        return "%d:%02d".format(v / 60, v % 60)
     }
 }
