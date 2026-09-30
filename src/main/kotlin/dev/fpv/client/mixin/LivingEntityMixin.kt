@@ -14,19 +14,14 @@
 package dev.fpv.client.mixin
 
 import dev.fpv.client.FpvClient
-import dev.fpv.flight.SafetyGuards
 import net.minecraft.client.Minecraft
 import net.minecraft.world.entity.LivingEntity
 import net.minecraft.world.entity.MoverType
 import net.minecraft.world.phys.Vec3
-import org.joml.Vector3f
 import org.spongepowered.asm.mixin.Mixin
 import org.spongepowered.asm.mixin.injection.At
 import org.spongepowered.asm.mixin.injection.Inject
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo
-import kotlin.math.abs
-import kotlin.math.sign
-import kotlin.math.sqrt
 
 @Mixin(LivingEntity::class)
 class LivingEntityMixin {
@@ -46,47 +41,36 @@ class LivingEntityMixin {
         // Take over completely: vanilla travel (and its move()) is cancelled.
         ci.cancel()
 
-        var t = FpvClient.throttle
-        // Reversible-3D: signed throttle with a center deadband (negative = reverse).
-        if (cfg.reversible3D && abs(t) < cfg.threeDThrottleDeadband) t = 0f
-
-        // Nose forward in world coordinates (single source: integrated attitude).
-        val fwd = Vector3f(0f, 0f, -1f).rotate(FpvClient.flight.attitude)
-        // Attitude is sanitized each integrate; if it is ever non-finite here,
-        // produce no thrust rather than a NaN velocity.
-        val fwdOk = SafetyGuards.finite(fwd)
-
-        // Data-driven airframe. Real SI force -> per-tick velocity units via
-        // TICK_ACCEL, anchored so 9.81 m/s^2 maps to the legacy 0.05 blocks/tick^2.
+        // Data-driven airframe; all physics lives in the headless-testable
+        // TranslationalDynamics. Thrust points along BODY-UP (attitude*(0,1,0)):
+        // level + hoverThrottle -> net vertical ~0; tilting -> translation + natural
+        // altitude loss. Battery sag derates thrust; ground effect boosts near ground.
         val af = cfg.activeAirframe()
-        val tMag = abs(t)
-        val thrustAccelMps2 = af.totalThrustN(tMag) / af.massKg.coerceAtLeast(1e-3f)
-        val thrustDelta = if (fwdOk && thrustAccelMps2.isFinite())
-            thrustAccelMps2 * TICK_ACCEL * sign(t) else 0f
+        val dyn = dev.fpv.flight.TranslationalDynamics(af)
 
-        // A pre-existing NaN velocity (vanilla treats NaN movement as a kick) is
-        // reset to zero rather than carried forward.
+        // Height above local ground for ground effect; unknown -> far away (no effect).
+        val agl = runCatching {
+            val bp = player.blockPosition()
+            player.y - player.level().getHeight(
+                net.minecraft.world.level.levelgen.Heightmap.Types.MOTION_BLOCKING, bp.x, bp.z
+            )
+        }.getOrDefault(100.0).toFloat()
+
+        val derate = FpvClient.flight.batteryDerate
+
+        // A pre-existing NaN velocity is reset to zero rather than carried forward.
         var vx = if (player.deltaMovement.x.isFinite()) player.deltaMovement.x else 0.0
         var vy = if (player.deltaMovement.y.isFinite()) player.deltaMovement.y else 0.0
         var vz = if (player.deltaMovement.z.isFinite()) player.deltaMovement.z else 0.0
 
-        val gravityDelta = GRAVITY * (af.gravity / 9.81f)
-        vx += fwd.x() * thrustDelta
-        vy += fwd.y() * thrustDelta - gravityDelta
-        vz += fwd.z() * thrustDelta
-
-        // Drag: linearDrag*v + quadraticDrag*v^2, scaled by airDrag / relative
-        // airspeed; heavier craft coasts longer.
-        val speed = sqrt(vx * vx + vy * vy + vz * vz)
-        if (speed > 1e-4) {
-            val massScale = REF_MASS_KG / af.massKg.coerceAtLeast(1e-3f)
-            val airScale = (af.airDrag / 0.40f) * af.relativeAirspeed
-            val decel = (af.linearDrag * speed + af.quadraticDrag * speed * speed) *
-                massScale * airScale
-            vx -= decel * (vx / speed)
-            vy -= decel * (vy / speed)
-            vz -= decel * (vz / speed)
-        }
+        val d = dyn.step(
+            FpvClient.flight.attitude, FpvClient.throttle,
+            vx, vy, vz, agl, derate,
+            cfg.reversible3D, cfg.threeDThrottleDeadband,
+        )
+        vx += d.x().toDouble()
+        vy += d.y().toDouble()
+        vz += d.z().toDouble()
 
         // Final guard: never assign/move on a NaN velocity (vanilla kicks on NaN).
         val fx = if (vx.isFinite()) vx else 0.0
@@ -96,13 +80,5 @@ class LivingEntityMixin {
         player.deltaMovement = v
         // Vanilla travel would have moved us after setting velocity; do it here.
         player.move(MoverType.SELF, v)
-    }
-
-    private companion object {
-        private const val GRAVITY = 0.05f
-        /** m/s^2 -> blocks/tick^2, anchored at legacy gravity 0.05. */
-        private const val TICK_ACCEL = GRAVITY / 9.81f
-        /** Reference mass (default freestyle) so drag reproduces the legacy feel. */
-        private const val REF_MASS_KG = 0.65f
     }
 }

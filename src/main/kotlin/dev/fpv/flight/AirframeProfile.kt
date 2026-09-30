@@ -147,6 +147,32 @@ class AirframeProfile {
      */
     var relativeAirspeed: Float = 1.00f
 
+    // ---- Ground effect (near-ground thrust enhancement) ----
+    /**
+     * Enable ground effect: within a few prop diameters of the ground the induced
+     * downwash is resisted and static thrust rises. Modeled as an exponential thrust
+     * multiplier  1 + gain * exp(-agl / heightBlocks)  (public open-form
+     * gym-pybullet-drones / Martin-Bohlke style; clean-room coefficients).
+     * agl <= 0 or disabled -> multiplier 1. Tunable / switchable.
+     */
+    var groundEffectEnabled: Boolean = true
+
+    /** Peak thrust multiplier boost just above the ground (0..~0.4). */
+    var groundEffectGain: Float = 0.25f
+
+    /** Vertical decay length in blocks: how fast the boost fades with AGL. */
+    var groundEffectHeightBlocks: Float = 2.0f
+
+    // ---- Prop-speed body drag (F = -diag(cxy,cxy,cz) * sumRpm * vBody) ----
+    /**
+     * Lateral body drag coefficient (X = right, Z = forward), proportional to
+     * rotor speed. Small; resists sideways/forward motion at high throttle.
+     */
+    var bodyDragXY: Float = 0.0006f
+
+    /** Vertical body drag coefficient (Y = up/down), proportional to rotor speed. */
+    var bodyDragZ: Float = 0.0015f
+
     /** Physics pipeline revision label; "v2.0" selects the current path. */
     var physicsModelVersion: String = "v2.0"
 

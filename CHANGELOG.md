@@ -6,6 +6,32 @@ Semantic Versioning; `main` is the development branch and `stable` points at the
 latest fully verified (zero-warning build + all verification scripts PASS)
 revision. No formal GitHub Release is published until real-hardware acceptance.
 
+## [Unreleased] — P-A translational lift (body-up thrust, hover, aero, ground effect, sag)
+
+### Added
+- **`dev.fpv.flight.TranslationalDynamics`** — Minecraft-free, headless-testable
+  translational plant. Lift now points along **BODY-UP** `up = attitude*(0,1,0)`
+  (the prop-disk normal), not the old virtual-nose `(0,0,-1)`. Net accel =
+  `thrustN*groundEffect*derate/m * up + gravity + world drag + prop-speed body drag`.
+  At level attitude + `effectiveHoverThrottle()` the vertical net force is ~0; tilting
+  the disk yields a horizontal component (translation) and a reduced vertical component
+  (natural altitude loss) — the real multirotor trade.
+- Hover: `effectiveHoverThrottle()` solves `totalThrustN(t_h)=m*g` (linear/quadratic,
+  clamped); GUI shows the hover point.
+- **Ground effect** (switchable, tunable): thrust multiplier
+  `1 + gain*exp(-agl/heightBlocks)` near the deck (public open-form model).
+- **Prop-speed body drag** `F = -diag(cxy,cxy,cz) * sumRpm * vBody`.
+- Battery sag already derates thrust (`batteryDerate = vbat/nominalV`); reaction torque
+  feeds yaw from the Stage-1 rigid plant.
+- `LivingEntityMixin` now only gathers inputs (attitude, throttle, velocity, AGL,
+  derate) and writes back the delta + `move()`; all physics lives in the pure class.
+
+### Headless verification (TranslationsTest, plain JVM)
+- Hover: net vertical accel 0.000000, no lateral accel.
+- Pitch 20° nose-down → forward accel + altitude loss; Roll 20° → lateral accel + loss.
+- Ground effect near deck: thrust boost (mult 1.25) > far (1.0).
+- Battery sag 0.7 vs 1.0 derates thrust. T/W(max)=7.5. 20k random steps finite. All PASS.
+
 ## [Unreleased] — P-D rotational realism (motor lag + rigid-body inertia)
 
 ### Added

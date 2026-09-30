@@ -1,0 +1,119 @@
+/*
+ * FPV Craft - MIT
+ * Translational flight dynamics (lift / hover / gravity / drag / ground effect /
+ * battery derate) as a Minecraft-free, headless-testable pure-logic class. The
+ * LivingEntityMixin only gathers inputs (attitude, throttle, current velocity,
+ * height-above-ground, battery derate) and writes back the result + move(); all
+ * the physics lives here so it can be unit-tested on a plain JVM.
+ *
+ * Lift points along the BODY-UP axis  up = attitude * (0,1,0)  (published
+ * quadcopter convention: thrust is normal to the prop disk). At level attitude
+ * up = (0,1,0) so totalThrustN(t_h) = m*g -> net vertical force ~0 (hover).
+ * Tilting the disk decomposes lift into a horizontal component (translation)
+ * and a reduced vertical component (natural altitude loss), exactly as a real
+ * multirotor. Rigid-body / aerodynamic open-form math modeled on the public
+ * gym-pybullet-drones / drone-models equations (MIT); coefficients are
+ * clean-room engineering starting values pending real-machine tuning.
+ */
+package dev.fpv.flight
+
+import org.joml.Quaternionf
+import org.joml.Vector3f
+import kotlin.math.abs
+import kotlin.math.exp
+import kotlin.math.sign
+import kotlin.math.sqrt
+
+class TranslationalDynamics(val af: AirframeProfile) {
+
+    companion object {
+        /** Vanilla gravity, blocks/tick^2. */
+        const val GRAVITY = 0.05f
+        /** m/s^2 -> blocks/tick^2, anchored so 9.81 m/s^2 == legacy 0.05. */
+        const val TICK_ACCEL = GRAVITY / 9.81f
+        /** Reference mass (default freestyle) so drag reproduces legacy feel. */
+        const val REF_MASS_KG = 0.65f
+    }
+
+    /**
+     * @return the per-tick velocity DELTA (blocks/tick) to add to current velocity.
+     * @param attitude integrated body->world quaternion (up = attitude*(0,1,0))
+     * @param t throttle, 0..1 (or signed when reversible3D)
+     * @param vx,vy,vz current velocity, blocks/tick
+     * @param aglBlocks height above local ground; <=0 or disabled => no ground effect
+     * @param derate battery voltage derate (vbat/nominalV), 0..1
+     * @param reversible3D signed throttle; negative reverses thrust
+     */
+    fun step(
+        attitude: Quaternionf,
+        tIn: Float,
+        vx: Double, vy: Double, vz: Double,
+        aglBlocks: Float,
+        derate: Float,
+        reversible3D: Boolean,
+        threeDDeadband: Float,
+    ): Vector3f {
+        var t = tIn
+        if (reversible3D && abs(t) < threeDDeadband) t = 0f
+        val tMag = abs(t)
+        val dir = if (t < 0f && reversible3D) -1f else 1f
+
+        // Body-up lift direction.
+        val up = Vector3f(0f, 1f, 0f).rotate(attitude)
+        if (!up.isFinite) return Vector3f(0f, -GRAVITY, 0f)
+
+        // Thrust magnitude: totalThrust * groundEffect * battery derate.
+        val gf = groundFactor(aglBlocks)
+        val mass = af.massKg.coerceAtLeast(1e-3f)
+        val thrustAccelMps2 = af.totalThrustN(tMag) * gf * derate.coerceIn(0f, 1.5f) / mass
+        val thrustDelta = thrustAccelMps2 * TICK_ACCEL * dir
+
+        var dx = up.x() * thrustDelta
+        var dy = up.y() * thrustDelta - GRAVITY * (af.gravity / 9.81f)
+        var dz = up.z() * thrustDelta
+
+        // World aerodynamic drag: linear + quadratic, mass/airspeed scaled.
+        val speed = sqrt(vx * vx + vy * vy + vz * vz).toFloat()
+        if (speed > 1e-4f) {
+            val massScale = REF_MASS_KG / mass
+            val airScale = (af.airDrag / 0.40f) * af.relativeAirspeed
+            val decel = (af.linearDrag * speed + af.quadraticDrag * speed * speed) *
+                massScale * airScale
+            dx -= decel * (vx.toFloat() / speed)
+            dy -= decel * (vy.toFloat() / speed)
+            dz -= decel * (vz.toFloat() / speed)
+        }
+
+        // Prop-speed body drag: F = -diag(cxy,cxy,cz) * sumRpm * vBody, then world.
+        val body = toBody(vx.toFloat(), vy.toFloat(), vz.toFloat(), attitude)
+        val rpmScale = tMag * af.motorCount
+        val bx = -af.bodyDragXY * rpmScale * body.x
+        val by = -af.bodyDragZ * rpmScale * body.y
+        val bz = -af.bodyDragXY * rpmScale * body.z
+        // rotate body-frame drag accel back to world (transpose of attitude)
+        val worldDrag = Vector3f(bx, by, bz)
+        worldDrag.rotate(Quaternionf(attitude).invert())
+        dx += worldDrag.x()
+        dy += worldDrag.y()
+        dz += worldDrag.z()
+
+        val out = Vector3f(dx, dy, dz)
+        return if (!out.isFinite) Vector3f(0f, -GRAVITY, 0f) else out
+    }
+
+    /** Ground-effect thrust multiplier: 1 + gain*exp(-agl/height). 1 when off/near-ground edge. */
+    fun groundFactor(aglBlocks: Float): Float {
+        if (!af.groundEffectEnabled) return 1f
+        if (aglBlocks <= 0f) return 1f + af.groundEffectGain
+        val h = af.groundEffectHeightBlocks.coerceAtLeast(0.1f)
+        return 1f + af.groundEffectGain * exp(-(aglBlocks / h).toDouble()).toFloat()
+    }
+
+    private fun toBody(wx: Float, wy: Float, wz: Float, attitude: Quaternionf): Vector3f {
+        val inv = Quaternionf(attitude).invert()
+        return Vector3f(wx, wy, wz).rotate(inv)
+    }
+}
+
+private val Vector3f.isFinite: Boolean
+    get() = x.isFinite() && y.isFinite() && z.isFinite()
