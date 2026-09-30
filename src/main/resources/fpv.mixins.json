@@ -6,6 +6,7 @@
     "GameRendererMixin",
     "CameraMixin",
     "LivingEntityMixin",
+    "LocalPlayerMixin",
     "GuiMixin"
   ],
   "injectors": {

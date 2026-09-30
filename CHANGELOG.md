@@ -6,6 +6,30 @@ Semantic Versioning; `main` is the development branch and `stable` points at the
 latest fully verified (zero-warning build + all verification scripts PASS)
 revision. No formal GitHub Release is published until real-hardware acceptance.
 
+## [Unreleased] — P-B remote vanilla-server compatibility layer
+
+### Added
+- **`ServerCompatConfig`** nested block (migrate() fills defaults): compatEnabled,
+  coordinatedTurn, coordTurnGain, coordPitchCompensation, fireworkEnabled,
+  fireworkThrottleThreshold, fireworkMinIntervalTicks, antiKick, softSpeedLimit(+cap).
+  Remote defaults on; creative / single-player are never speed-limited.
+- **`dev.fpv.flight.ServerCompatLogic`** — Minecraft-free, headless-tested logic:
+  nose = attitude*(0,0,-1) -> vanilla yaw/pitch; inverse of `Entity.turn(d,e)`'s 0.15
+  scale (so one per-tick call reaches the target look, yaw wrapped shortest way);
+  roll -> "coordinated turn" yaw/pitch bias baked into the look; fireworks gating
+  (threshold + minimum interval + holding a firework + fall-flying); setback reaction
+  widens the firework interval and softens the turn gain.
+- **`LocalPlayerMixin`** (remote only; does NOT cancel travel, does NOT inject velocity):
+  maps attitude onto vanilla look each tick, fires fireworks for throttle, defers to the
+  server on setback. Wrapped in runCatching. [NEEDS LOCAL VERIFICATION] on a real
+  Paper/Velocity server.
+
+### Headless verification (ServerCompatTest, plain JVM)
+- nose->yaw/pitch round-trip exact; lookDelta reconstructs target via *0.15; yaw wrap
+  shortest way; coordinated turn sign + monotonic + off->zero; fireworks gating
+  (threshold/gliding/held/interval); setback widens interval 20->80 and softens gain.
+  15/15 PASS.
+
 ## [Unreleased] — Condition-driven prop-wash (washout disturbance)
 
 ### Added

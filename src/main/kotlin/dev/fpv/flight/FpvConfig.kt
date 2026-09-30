@@ -169,6 +169,51 @@ class RaceConfig {
     var sectorsEnabled = true
 }
 
+/**
+ * Remote (vanilla server / Paper / Velocity) flight-compatibility layer.
+ *
+ * On a real server we cannot freely rewrite velocity (anti-cheat / rubber-band), so we
+ * DO NOT cancel travel and DO NOT inject off-vanilla velocity. Instead we map the FPV
+ * attitude onto the vanilla player: the nose direction drives vanilla yaw/pitch look,
+ * roll becomes a *coordinated-turn* yaw/pitch bias, and throttle is realized with
+ * fireworks rockets. Anti-kick tolerates setbacks. This whole block is a compatibility
+ * mapping layer, NOT true fixed-wing coordinated flight.
+ *
+ * Defaults target REMOTE servers: on; single-player / creative keep full physics and
+ * are exempt from the soft speed limit.
+ */
+class ServerCompatConfig {
+    /** Master switch. Remote servers default on; single-player may leave it off. */
+    var compatEnabled: Boolean = true
+
+    /** Roll -> extra-yaw coordinated-turn bias baked into the vanilla look. */
+    var coordinatedTurn: Boolean = true
+
+    /** Gain mapping roll amount (deg) -> extra yaw (deg). Compatibility layer only. */
+    var coordTurnGain: Float = 0.5f
+
+    /** Pitch compensation (deg per deg of roll) to offset banked-turn altitude loss. */
+    var coordPitchCompensation: Float = 0.3f
+
+    /** Realize throttle with fireworks rockets when fall-flying. */
+    var fireworkEnabled: Boolean = true
+
+    /** Throttle (0..1) above which a firework boost is requested. */
+    var fireworkThrottleThreshold: Float = 0.5f
+
+    /** Minimum ticks between two firework uses (anti-spam). */
+    var fireworkMinIntervalTicks: Int = 20
+
+    /** Rubber-band / setback reaction: accept server position, back off boost/turn. */
+    var antiKick: Boolean = true
+
+    /** Cap horizontal speed (remote only; creative / single-player never limited). */
+    var softSpeedLimit: Boolean = false
+
+    /** Soft horizontal speed cap, blocks/tick (only when softSpeedLimit && antiKick). */
+    var softSpeedLimitBpt: Float = 0.6f
+}
+
 /** Recording + playback knobs for the data-driven replay system (dev.fpv.replay). */
 class ReplayConfig {
     /** "FIXED" = decimate to [sampleRateHz]; "FRAME" = write every rendered frame. */
@@ -323,6 +368,9 @@ class FpvConfig {
     var pid: PidConfig? = PidConfig()
     var throttleLimit: ThrottleLimitConfig? = ThrottleLimitConfig()
     var race: RaceConfig? = RaceConfig()
+
+    /** Remote-server compatibility layer (look mapping / fireworks / anti-kick). */
+    var serverCompat: ServerCompatConfig? = ServerCompatConfig()
     var replay: ReplayConfig? = ReplayConfig()
     var export: ExportConfig? = ExportConfig()
 
@@ -495,6 +543,7 @@ class FpvConfig {
         if (pid == null) pid = PidConfig()
         if (throttleLimit == null) throttleLimit = ThrottleLimitConfig()
         if (race == null) race = RaceConfig()
+        if (serverCompat == null) serverCompat = ServerCompatConfig()
         if (replay == null) replay = ReplayConfig()
         if (export == null) export = ExportConfig()
         if (osdElements.isEmpty()) osdElements = OsdLayout.defaultLayout()
