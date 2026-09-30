@@ -147,8 +147,8 @@ object FpvClient : ClientModInitializer {
                 if (mc.screen == null) mc.setScreen(ReplayScreen(null))
             }
             FlightRecorder.pollAuxTrigger(input.lastFrame())
-            // Key arming is available only when no arm switch is configured.
-            if (config.armSwitchAxis < 0) {
+            // Key arming is available only when no arm switch/button is configured.
+            if (config.armSwitchAxis < 0 && config.armButtonIndex < 0) {
                 while (armKey.consumeClick()) {
                     armed = !armed
                     playToggle(mc)
@@ -197,10 +197,13 @@ object FpvClient : ClientModInitializer {
         // though the flight itself is paused while a screen is open.
         val channels = input.poll(dt)
 
-        // Arm switch: level-based (two-position switch), raw axis indexed.
-        val armAxisIdx = config.armSwitchAxis
-        if (armAxisIdx >= 0) {
-            armed = channels.aux.getOrElse(armAxisIdx) { 0f } > Defaults.SWITCH_TRIGGER
+        // Arm source (data-driven): a bound HID button takes precedence, then a
+        // bound level-based aux axis; otherwise the keyboard B key toggles.
+        if (config.armButtonIndex >= 0) {
+            val btns = input.buttons()
+            armed = config.armButtonIndex in btns.indices && btns[config.armButtonIndex].toInt() != 0
+        } else if (config.armSwitchAxis >= 0) {
+            armed = channels.aux.getOrElse(config.armSwitchAxis) { 0f } > Defaults.SWITCH_TRIGGER
         }
 
         // ---- Failsafe / battery / telemetry run every frame, even with a GUI

@@ -10,6 +10,7 @@ import dev.fpv.client.osd.OsdElement
 import dev.fpv.client.osd.OsdLayout
 import dev.fpv.input.AuxChannel
 import dev.fpv.input.DeviceProfile
+import dev.fpv.input.KnownDevices
 import dev.fpv.input.SlotCalib
 import dev.fpv.input.StickSlot
 import net.fabricmc.loader.api.FabricLoader
@@ -281,6 +282,9 @@ class FpvConfig {
     /** Raw aux axis used as the arm switch; -1 = off. */
     var armSwitchAxis = -1
 
+    /** Raw HID button used as the arm switch; -1 = off (takes precedence over axis). */
+    var armButtonIndex = -1
+
     // ---- Setpoint (RC) smoothing ----
     var setpointSmoothingEnabled = Defaults.SETPOINT_SMOOTHING_ENABLED
     /** Third-order lag cutoff on roll/pitch/yaw sticks, Hz. */
@@ -360,12 +364,15 @@ class FpvConfig {
         var p = profiles.firstOrNull { it.fingerprint == fingerprint }
         if (p == null) {
             p = DeviceProfile(fingerprint = fingerprint, modelName = deviceName, handMode = handMode)
+            // Known transmitter: pre-fill its layout from the data table, once.
+            KnownDevices.match(deviceName)?.let { KnownDevices.apply(p, it) }
             profiles.add(p)
         }
         activeProfileFingerprint = fingerprint
         slotCalib = p.gimbal
         auxChannels = p.aux
         handMode = p.handMode
+        armButtonIndex = p.armButton
         return p
     }
 
@@ -464,8 +471,11 @@ class FpvConfig {
 
     // ---- Persistence ----
     fun save() {
-        // Keep the active profile's hand-mode in sync with the live setting.
-        activeProfile()?.handMode = handMode
+        // Keep the active profile's hand-mode/arm in sync with the live setting.
+        activeProfile()?.let {
+            it.handMode = handMode
+            it.armButton = armButtonIndex
+        }
         Files.createDirectories(configPath().parent)
         Files.writeString(configPath(), gson.toJson(this))
     }

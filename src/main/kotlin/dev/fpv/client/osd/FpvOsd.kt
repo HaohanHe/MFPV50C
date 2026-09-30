@@ -154,7 +154,10 @@ object FpvOsd {
         // ---- Center-anchored: artificial horizon + sidebars + crosshair ----
         val inv = Quaternionf(flight.attitude).conjugate()
         val bodyUp = Vector3f(0f, 1f, 0f).rotate(inv)
-        val roll = atan2(-bodyUp.x, bodyUp.y)
+        // Sign matches the camera so the OSD line overlays the true horizon as
+        // seen in the already-rolled FPV picture (verified: roll-right 20 ->
+        // true horizon -20 on screen, old sign drew +20).
+        val roll = atan2(bodyUp.x, bodyUp.y)
 
         if (el(OsdLayout.ARTIFICIAL_HORIZON)?.enabled == true ||
             el(OsdLayout.HORIZON_SIDEBARS)?.enabled == true

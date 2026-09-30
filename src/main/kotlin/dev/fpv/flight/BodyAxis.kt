@@ -18,8 +18,8 @@ enum class BodyAxis(
     /** Body-frame unit axis for a positive command. */
     val axis: Vector3f,
 ) {
-    /** Pitch positive = push stick forward = nose down, rotation about +X. */
-    PITCH(0, Vector3f(1f, 0f, 0f)),
+    /** Pitch positive = push stick forward = nose down, rotation about -X. */
+    PITCH(0, Vector3f(-1f, 0f, 0f)),
 
     /** Roll positive = right, rotation about -Z. */
     ROLL(1, Vector3f(0f, 0f, -1f)),

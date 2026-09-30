@@ -22,4 +22,7 @@ class DeviceProfile(
 
     /** Named aux controls (sliders/dials/knobs and grouped switches). */
     var aux: MutableList<AuxChannel> = mutableListOf(),
+
+    /** Raw HID button index used to arm, -1 = arm by axis or by key. */
+    var armButton: Int = -1,
 )
