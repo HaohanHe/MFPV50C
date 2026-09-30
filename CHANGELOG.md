@@ -6,6 +6,25 @@ Semantic Versioning; `main` is the development branch and `stable` points at the
 latest fully verified (zero-warning build + all verification scripts PASS)
 revision. No formal GitHub Release is published until real-hardware acceptance.
 
+## [Unreleased] — graphical radio calibration + P-B remote compatibility
+
+### Added
+- **Graphical 4-step `CalibrationScreen`** replacing the text-only move-to-bind:
+  - HAND: live twin-stick map colored by channel (Roll/Pitch/Yaw/Throttle), redrawn
+    on every Mode 1..4 change.
+  - CENTER (new): release-all step with a live per-axis bar and a settle detector
+    (every raw source still for CENTER_FRAMES) that gates the binding baseline.
+  - BIND: large scope draws the live gimbal dot and measured endpoints (analog;
+    horizontal/vertical resolved from the hand-mode slot) or the detected switch
+    positions; travel not swept to both ends shows a yellow guide instead of silently
+    accepting a short sweep.
+  - New zh/en lang keys: cal.fpv.center_hint/center_ok/center_wait, travel_good/
+    travel_low, switch_more.
+
+### Changed
+- Bind mini stick map uses a label-free mode (highlight stick + axis only) so it does
+  not overlap the step title.
+
 ## [Unreleased] — P-B remote vanilla-server compatibility layer
 
 ### Added
