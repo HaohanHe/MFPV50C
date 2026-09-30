@@ -178,6 +178,9 @@ class OsdEditorScreen(private val parent: Screen?) :
         OsdLayout.FLIGHT_TIMER -> "T+0:42"
         OsdLayout.THROTTLE -> "THR 45%"
         OsdLayout.MODE -> "FPV ACRO"
+        OsdLayout.ATTITUDE -> "P +12 R -3"
+        OsdLayout.CURRENT -> "CUR 24.0A"
+        OsdLayout.MAH_DRAWN -> "MAH 320"
         OsdLayout.CENTER_WARNING -> "(warn)"
         else -> ""
     }
@@ -193,6 +196,9 @@ class OsdEditorScreen(private val parent: Screen?) :
         OsdLayout.BATTERY -> "Battery"
         OsdLayout.LQ -> "LinkQuality"
         OsdLayout.FLIGHT_TIMER -> "Timer"
+        OsdLayout.ATTITUDE -> "Attitude"
+        OsdLayout.CURRENT -> "Current"
+        OsdLayout.MAH_DRAWN -> "M Ah"
         OsdLayout.CENTER_WARNING -> "CenterWarn"
         else -> id
     }

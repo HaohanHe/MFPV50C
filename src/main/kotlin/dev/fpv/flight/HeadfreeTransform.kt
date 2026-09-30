@@ -8,8 +8,8 @@
  *
  * Yaw stick itself is unaffected (it always rotates the nose).
  *
- * NOTE: the rotation sign convention below is the clean-room choice; the exact
- * handedness relative to a real radio must be confirmed on the bench.
+ * The rotation handedness below was verified numerically in the cloud (world
+ * angular velocity dotted with current body roll/pitch axes over multiple yaws).
  */
 package dev.fpv.flight
 
@@ -48,9 +48,12 @@ class HeadfreeTransform {
         val d = (currentYawDeg - yaw0Deg) * (PI / 180.0).toFloat()
         val c = cos(d)
         val s = sin(d)
-        // Rotate the earth-frame vector by the heading delta into body frame.
-        val bodyRoll = earthRoll * c + earthPitch * s
-        val bodyPitch = earthPitch * c - earthRoll * s
+        // Transform the earth-frame stick vector into the body frame. Verified
+        // numerically (world angular velocity dotted with body roll/pitch axes):
+        //   bodyRoll  = r*c - p*s
+        //   bodyPitch = p*c + r*s
+        val bodyRoll = earthRoll * c - earthPitch * s
+        val bodyPitch = earthPitch * c + earthRoll * s
         return floatArrayOf(bodyRoll, bodyPitch)
     }
 }

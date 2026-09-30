@@ -12,6 +12,7 @@ import dev.fpv.replay.FlightRecorder
 import dev.fpv.replay.ReplayManager
 import dev.fpv.replay.ReplayScreen
 import dev.fpv.flight.BatteryModel
+import dev.fpv.flight.BatteryStage
 import dev.fpv.flight.Defaults
 import dev.fpv.flight.FlightController
 import dev.fpv.flight.FlightFunction
@@ -53,6 +54,50 @@ object FpvClient : ClientModInitializer {
      */
     @JvmField
     var armed = false
+
+    /**
+     * Arming-check blocker codes for the current frame (Betaflight arming-disable
+     * flags, client equivalent). Empty = arming allowed. The codes are only
+     * enforced on the disarmed -> armed transition (we never silently refuse to
+     * unlock without a reason; reasons are surfaced on the OSD / config screen).
+     */
+    @JvmField
+    var armingBlockers: List<String> = emptyList()
+
+    /** Keyboard arming additionally requires a low throttle (BF THROTTLE check). */
+    private const val ARMING_THROTTLE_MAX = 0.02f
+
+    /** Recompute arming blockers from the current input / battery / link state. */
+    fun refreshArmingBlockers() {
+        val b = mutableListOf<String>()
+        if (config.useRadio && !input.radioActive) b += "NO_RX"
+        if (config.useRadio && !config.isCalibrated()) b += "NOT_CALIBRATED"
+        if (battery.stage == BatteryStage.CRITICAL) b += "BATTERY_CRITICAL"
+        if (link.state == LinkState.FAILSAFE) b += "RX_FAILSAFE"
+        armingBlockers = b
+    }
+
+    /** Human-readable labels for [armingBlockers] (for OSD / UI). */
+    fun armingBlockerText(): List<String> = armingBlockers.map {
+        when (it) {
+            "NO_RX" -> "未检测到遥控器（键盘备用：按 V 开启 FPV）"
+            "NOT_CALIBRATED" -> "遥控器未校准：设置 → 摇杆校准"
+            "BATTERY_CRITICAL" -> "电池电量过低，禁止解锁"
+            "RX_FAILSAFE" -> "链路失效（failsafe），禁止解锁"
+            else -> it
+        }
+    }
+
+    /**
+     * Apply an arm REQUEST with the arming-check gate. Only the disarmed -> armed
+     * transition is blocked; once armed the request is honored (other systems
+     * handle in-flight failsafe / low-battery).
+     */
+    private fun applyArmRequest(wantArm: Boolean) {
+        if (!wantArm) { armed = false; return }
+        if (armed) { armed = true; return }
+        armed = armingBlockers.isEmpty()
+    }
 
     /** Failsafe / virtual-link-quality state machine. */
     @JvmField
@@ -159,8 +204,18 @@ object FpvClient : ClientModInitializer {
             // Key arming is available only when no arm switch/button/mode binding exists.
             if (!config.armBindingAutomatic()) {
                 while (armKey.consumeClick()) {
-                    armed = !armed
-                    playToggle(mc)
+                    if (!armed) {
+                        // BF-style checks: no blockers + throttle low before arming.
+                        refreshArmingBlockers()
+                        val throttleLow = input.lastFrame().throttle <= ARMING_THROTTLE_MAX
+                        if (armingBlockers.isEmpty() && throttleLow) {
+                            armed = true
+                            playToggle(mc)
+                        }
+                    } else {
+                        armed = false
+                        playToggle(mc)
+                    }
                 }
             }
             tick(mc)
@@ -207,11 +262,13 @@ object FpvClient : ClientModInitializer {
         val channels = input.poll(dt)
 
         // ---- Data-driven Modes routing ----
+        // Recompute arming-check blockers (state from prior frame) before gating.
+        refreshArmingBlockers()
         val bindings = config.activeProfile()?.modes ?: emptyList()
         val modeRes = modes.evaluate(channels, bindings)
         if (bindings.isNotEmpty()) {
-            // ARM (PREARM gate applied inside the controller).
-            armed = modeRes.armed
+            // ARM (PREARM gate + arming-check blockers applied).
+            applyArmRequest(modeRes.armed)
             // Flight-mode select (ANGLE/HORIZON/ACRO); null = keep current.
             modeRes.desiredMode?.let { if (flight.ready) flight.requestMode(it) }
             // HEADFREE level -> drive the runtime head-free flag.
@@ -239,14 +296,18 @@ object FpvClient : ClientModInitializer {
             }
         } else {
             // Legacy arm sources: a bound HID button, then a level aux axis.
-            if (config.armButtonIndex >= 0) {
-                val btns = input.buttons()
-                armed = config.armButtonIndex in btns.indices &&
-                    btns[config.armButtonIndex].toInt() != 0
-            } else if (config.armSwitchAxis >= 0) {
-                armed = channels.aux.getOrElse(config.armSwitchAxis) { 0f } >
-                    Defaults.SWITCH_TRIGGER
+            val wantArm = when {
+                config.armButtonIndex >= 0 -> {
+                    val btns = input.buttons()
+                    config.armButtonIndex in btns.indices &&
+                        btns[config.armButtonIndex].toInt() != 0
+                }
+                config.armSwitchAxis >= 0 ->
+                    channels.aux.getOrElse(config.armSwitchAxis) { 0f } >
+                        Defaults.SWITCH_TRIGGER
+                else -> armed
             }
+            applyArmRequest(wantArm)
         }
 
         // ---- Failsafe / battery / telemetry run every frame, even with a GUI

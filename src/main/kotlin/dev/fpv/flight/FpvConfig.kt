@@ -41,11 +41,15 @@ class BatteryConfig {
     /** Per-cell voltage that raises the OSD critical (published 3.30V). */
     var criticalCellV: Float = Defaults.VBAT_CRITICAL_CELL
 
+    /** Per-cell internal resistance, ohms (sag = I * cells * this). */
+    var internalResistancePerCellOhm: Float = Defaults.CELL_INTERNAL_R_OHM
+
     fun copy(): BatteryConfig = BatteryConfig().also {
         it.cellCount = cellCount
         it.packCapacityMah = packCapacityMah
         it.warningCellV = warningCellV
         it.criticalCellV = criticalCellV
+        it.internalResistancePerCellOhm = internalResistancePerCellOhm
     }
 }
 
@@ -519,10 +523,12 @@ class FpvConfig {
         private fun defaultAirframes(): MutableList<AirframeProfile> {
             val freestyle = AirframeProfile().apply {
                 name = "Freestyle 5in"
-                comment = "Balanced freestyle starting point. Engineering values, not an OEM default; tuned so t=1 thrust accel ~= legacy THRUST_POWER=1.1 blocks/tick and dragK=0.015."
+                comment = ("Balanced 5in freestyle (4S). Mass/inertia/thrust grounded in open data " +
+                    "(Flightmare m=0.73-0.76; 5in 4S static pull ~1.1-1.2 kg/motor); angular drag scaled " +
+                    "to keep tau~5.9ms so the feel matches the legacy build. See research-v2/phys-const.")
                 massKg = 0.65f
-                inertiaXX = 0.0022f; inertiaYY = 0.0035f; inertiaZZ = 0.0018f
-                motorCount = 4; maxThrustPerMotorN = 35.0f
+                inertiaXX = 0.0025f; inertiaYY = 0.0030f; inertiaZZ = 0.0045f
+                motorCount = 4; maxThrustPerMotorN = 12.0f
                 thrustLinear = 1.0f; thrustQuad = 0.0f
                 propInch = 5.1f; propPitch = 4.6f; motorKv = 1900
                 cameraTiltDeg = 25f; minThrottle = 0.055f
@@ -531,7 +537,7 @@ class FpvConfig {
                 airDrag = 0.40f; airGrip = 0.85f; relativeAirspeed = 1.00f
                 propwashEnabled = false; pidBehavior = "PERFECT"
                 linearDrag = 0.0f; quadraticDrag = 0.015f
-                angularDragXX = 0.44f; angularDragYY = 0.70f; angularDragZZ = 0.36f
+                angularDragXX = 0.50f; angularDragYY = 0.60f; angularDragZZ = 0.90f
                 cgOffsetX = 0f; cgOffsetY = 0f; cgOffsetZ = 0f
             }
             val f9u = AirframeProfile().apply {
@@ -541,8 +547,8 @@ class FpvConfig {
                     "[FAI C.1.2 / TWG 2.2]. Thrust/inertia/drag are CLASS ESTIMATES, not rulebook " +
                     "numbers -- to be tuned on a real model.")
                 massKg = 0.95f
-                inertiaXX = 0.0030f; inertiaYY = 0.0045f; inertiaZZ = 0.0025f
-                motorCount = 4; maxThrustPerMotorN = 30.0f
+                inertiaXX = 0.0040f; inertiaYY = 0.0050f; inertiaZZ = 0.0070f
+                motorCount = 4; maxThrustPerMotorN = 18.0f
                 thrustLinear = 1.0f; thrustQuad = 0.05f
                 propInch = 6.0f; propPitch = 5.0f; motorKv = 1900; cellCountS = 6
                 cameraTiltDeg = 30f; minThrottle = 0.06f
@@ -551,7 +557,7 @@ class FpvConfig {
                 airDrag = 0.45f; airGrip = 0.85f; relativeAirspeed = 1.00f
                 propwashEnabled = false; pidBehavior = "racing"
                 linearDrag = 0.0f; quadraticDrag = 0.018f
-                angularDragXX = 0.50f; angularDragYY = 0.75f; angularDragZZ = 0.42f
+                angularDragXX = 0.67f; angularDragYY = 0.83f; angularDragZZ = 1.17f
                 cgOffsetX = 0f; cgOffsetY = 0f; cgOffsetZ = 0f
                 battery = BatteryConfig().apply {
                     cellCount = 6            // F9U allows up to 6S

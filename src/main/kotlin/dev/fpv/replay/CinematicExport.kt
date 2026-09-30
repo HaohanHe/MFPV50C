@@ -16,8 +16,11 @@ package dev.fpv.replay
 
 import dev.fpv.client.FpvClient
 import dev.fpv.flight.ExportConfig
+import com.mojang.blaze3d.opengl.GlTextureView
 import net.fabricmc.loader.api.FabricLoader
+import net.minecraft.client.Minecraft
 import org.lwjgl.opengl.GL11
+import org.lwjgl.opengl.GL30
 import java.awt.image.BufferedImage
 import java.nio.ByteBuffer
 import java.nio.file.Files
@@ -158,6 +161,9 @@ object CinematicExport {
         private var encoderOut: java.io.OutputStream? = null
         private var pngDir: Path? = null
 
+        /** Lazily-created READ-only FBO that we attach the main color texture to. */
+        private var readFbo = 0
+
         /** Where the run lands: .mp4/.mkv (ffmpeg) or a PNG frame dir (fallback). */
         lateinit var resolvedOutput: Path
             private set
@@ -201,23 +207,49 @@ object CinematicExport {
             return false
         }
 
-        /** Read the bound GL framebuffer once and add it to the accumulator. */
+        /**
+         * Read the VANILLA MAIN framebuffer color attachment (the texture the
+         * world was just rendered into at renderLevel TAIL, before the GUI) and
+         * add it to the accumulator. We attach that same GPU texture to our own
+         * read-only FBO rather than creating a new render target (which nothing
+         * would draw into -> black frames). On a non-GL backend we fall back to
+         * whatever framebuffer is currently bound.
+         */
         fun readAndAccumulate() {
-            val vp = IntArray(4)
-            GL11.glGetIntegerv(GL11.GL_VIEWPORT, vp)
-            val w = vp[2]; val h = vp[3]
-            check(w > 0 && h > 0) { "bad viewport ${w}x${h}" }
+            val mainTarget = Minecraft.getInstance().mainRenderTarget
+            val w = mainTarget.width
+            val h = mainTarget.height
+            check(w > 0 && h > 0) { "bad main target ${w}x${h}" }
             if (w != viewW || h != viewH || acc.isEmpty()) {
                 viewW = w; viewH = h
                 acc = FloatArray(w * h * 3)
             }
             val buf = ByteBuffer.allocateDirect(w * h * 4)
-            // [NEEDS LOCAL VERIFICATION] confirm the world framebuffer (not the
-            // screen backbuffer) is bound at renderLevel TAIL on 1.21.11; if the
-            // read comes back black, bind mc.mainRenderTarget's draw target here.
+
+            // Best-effort: resolve the GL texture id of the main color attachment.
+            val colorView = mainTarget.getColorTextureView()
+            val glTexId = if (colorView is GlTextureView) colorView.texture().glId() else -1
+
+            val prevReadFbo = GL11.glGetInteger(GL30.GL_READ_FRAMEBUFFER_BINDING)
+            if (glTexId >= 0) {
+                if (readFbo == 0) readFbo = GL30.glGenFramebuffers()
+                GL30.glBindFramebuffer(GL30.GL_READ_FRAMEBUFFER, readFbo)
+                GL30.glFramebufferTexture2D(
+                    GL30.GL_READ_FRAMEBUFFER, GL30.GL_COLOR_ATTACHMENT0,
+                    GL11.GL_TEXTURE_2D, glTexId, 0,
+                )
+                val complete = GL30.glCheckFramebufferStatus(GL30.GL_READ_FRAMEBUFFER)
+                check(complete == GL30.GL_FRAMEBUFFER_COMPLETE) {
+                    "main color texture not framebuffer-complete (0x${Integer.toHexString(complete)})"
+                }
+                GL11.glReadBuffer(GL30.GL_COLOR_ATTACHMENT0)
+            }
+            // else: non-GL backend -> read the currently bound target as-is.
+
             GL11.glReadPixels(0, 0, w, h, GL11.GL_RGBA, GL11.GL_UNSIGNED_BYTE, buf)
+            GL30.glBindFramebuffer(GL30.GL_READ_FRAMEBUFFER, prevReadFbo)
+
             val inv = 1f / blurN
-            val px = w * h * 4
             for (i in 0 until w * h) {
                 val o = i * 4
                 acc[i * 3] += (buf.get(o).toInt() and 0xFF) * inv
@@ -253,7 +285,9 @@ object CinematicExport {
                     if (!cfg.letterbox || (rowActive && dx in 0 until drawW)) {
                         // map to source
                         val sx = if (drawW > 0) (dx * viewW / drawW).coerceIn(0, viewW - 1) else 0
-                        val sy = if (drawH > 0) (dy * viewH / drawH).coerceIn(0, viewH - 1) else 0
+                        val syTop = if (drawH > 0) (dy * viewH / drawH).coerceIn(0, viewH - 1) else 0
+                        // glReadPixels is bottom-up; flip to top-down for the image.
+                        val sy = viewH - 1 - syTop
                         val si = (sy * viewW + sx) * 3
                         out[o] = acc[si].toInt().coerceIn(0, 255).toByte()
                         out[o + 1] = acc[si + 1].toInt().coerceIn(0, 255).toByte()

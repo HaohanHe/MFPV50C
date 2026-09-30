@@ -90,12 +90,13 @@ object Defaults {
     /** Published vbatfullcellvoltage / vbatmaxcellvoltage. */
     const val VBAT_FULL_CELL = 4.10f
     const val VBAT_MAX_CELL = 4.30f
-    /** Pack sag at full throttle, volts (engineering starting value, virtual pack). */
-    const val BATTERY_SAG_V = 0.6f
     /** Open-circuit recovery time constant when throttle relaxes (seconds). */
     const val BATTERY_RECOVERY_TAU = 1.5f
     /** Current draw at full throttle, amps (engineering starting value). */
     const val CURRENT_AT_FULL_THROTTLE_A = 30f
+    /** Per-cell internal resistance, ohms (pack R = cells * this; open data:
+     *  good LiPo ~3-5 mOhm/cell, giving 4S 12-20 mOhm / 6S 18-30 mOhm). */
+    const val CELL_INTERNAL_R_OHM = 0.004f
 
     // ---- Throttle curve (two-segment quadratic bezier) ----
     /** Published thrMid8 / thrExpo8 defaults (percent). */
@@ -130,4 +131,14 @@ object Defaults {
     /** Enabled by default so TPA / I-term / anti-gravity / FF are live; can be
      *  disabled for direct (ideal) rate integration. */
     const val PID_ENABLED = true
+
+    // ---- OSD artificial horizon / pitch ladder (synthetic instrument) ----
+    /** Vertical pixels per degree of pitch for the horizon group. */
+    const val OSD_PITCH_PX_PER_DEG = 2.0f
+    /** Pitch-reference bars beyond this many local pixels are hidden. */
+    const val OSD_PITCH_LADDER_RANGE_PX = 70f
+    /** Half-length of a pitch-ladder tick, pixels. */
+    const val OSD_PITCH_TICK_HALF = 10
+    /** Absolute pitch angles (degrees) at which reference ticks are drawn (both signs). */
+    val OSD_PITCH_LADDER_DEG = intArrayOf(15, 30)
 }

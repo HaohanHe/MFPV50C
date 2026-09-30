@@ -26,6 +26,10 @@ class BatteryModel(private val cfg: FpvConfig) {
     var mAhDrawn: Float = 0f
         private set
 
+    /** Most recent pack current estimate, amps. */
+    var currentA: Float = 0f
+        private set
+
     var stage: BatteryStage = BatteryStage.OK
         private set
 
@@ -71,6 +75,7 @@ class BatteryModel(private val cfg: FpvConfig) {
 
         // mAh integration: I = k * demand, mAh = integral(I dt / 3600).
         val currentA = Defaults.CURRENT_AT_FULL_THROTTLE_A * demand
+        this.currentA = currentA
         mAhDrawn += currentA * dt / 3600f * 1000f
 
         // Open-circuit voltage follows consumed charge only when capacity known.
@@ -81,12 +86,14 @@ class BatteryModel(private val cfg: FpvConfig) {
             fullPackV()
         }
 
-        // Sag: snap toward demand*k on load, relax slowly on release.
-        val targetSag = Defaults.BATTERY_SAG_V * demand
+        // Sag from internal resistance: target = I * pack R (Ohm's law). Pack R
+        // = cells * per-cell internal resistance (open data ~3-5 mOhm/cell).
+        val packR = cells() * b.internalResistancePerCellOhm
+        val targetSag = currentA * packR
         sagV = if (targetSag >= sagV) {
-            targetSag // load: fast sag
+            targetSag // load: instantaneous IR drop
         } else {
-            // release: first-order recovery with a slow time constant
+            // release: first-order electrochemical recovery with a slow tau
             val a = (dt / (Defaults.BATTERY_RECOVERY_TAU + dt)).coerceIn(0f, 1f)
             sagV + a * (targetSag - sagV)
         }

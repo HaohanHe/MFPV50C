@@ -11,11 +11,13 @@ package dev.fpv.client.osd
 
 import dev.fpv.client.FpvClient
 import dev.fpv.flight.BatteryStage
+import dev.fpv.flight.Defaults
 import dev.fpv.flight.LinkState
 import net.minecraft.client.Minecraft
 import net.minecraft.client.gui.GuiGraphics
 import org.joml.Quaternionf
 import org.joml.Vector3f
+import kotlin.math.asin
 import kotlin.math.atan2
 
 object FpvOsd {
@@ -28,9 +30,6 @@ object FpvOsd {
     private const val RED_FILL = 0xFFFF5555.toInt()
     private const val CYAN = 0xFF55FFFF.toInt()
     private const val GRAY = 0xFFAAAAAA.toInt()
-
-    /** Pixels the artificial horizon shifts per unit of world-up depth (pitch). */
-    private const val HORIZON_PITCH_PX = 120f
 
     fun draw(ctx: GuiGraphics) {
         val mc = Minecraft.getInstance()
@@ -66,19 +65,23 @@ object FpvOsd {
             )
         }
 
-        // Guidance while the player is trying to fly but cannot yet.
+        // Guidance while the player is trying to fly but cannot yet. List ALL
+        // arming-check blockers (Betaflight-style) rather than a single message,
+        // so the pilot is never silently refused an unlock without a reason.
         if (p.isFallFlying && !flight.ready) {
-            when {
-                cfg.useRadio && !FpvClient.input.lastFrame().present ->
-                    ctx.drawCenteredString(
-                        font, "未检测到遥控器（键盘备用：按 V 开启 FPV）", cx, 8, GRAY
-                    )
-                cfg.useRadio && !cfg.isCalibrated() ->
-                    ctx.drawCenteredString(
-                        font, "遥控器未校准：打开设置 → 摇杆校准", cx, 8, YELLOW_FILL
-                    )
-                !FpvClient.armed ->
-                    ctx.drawCenteredString(font, "DISARMED 未解锁（按 B 解锁）", cx, 8, RED_FILL)
+            val codes = FpvClient.armingBlockers
+            val texts = FpvClient.armingBlockerText()
+            if (texts.isEmpty()) {
+                ctx.drawCenteredString(font, "准备中…", cx, 8, GRAY)
+            } else {
+                texts.forEachIndexed { i, r ->
+                    val col = when (codes[i]) {
+                        "NO_RX" -> GRAY
+                        "BATTERY_CRITICAL", "RX_FAILSAFE" -> RED_FILL
+                        else -> YELLOW_FILL
+                    }
+                    ctx.drawCenteredString(font, r, cx, 8 + i * 10, col)
+                }
             }
             return
         }
@@ -145,6 +148,35 @@ object FpvOsd {
             ctx.drawString(font, thrStr, e.x, e.y, GREEN, true)
         }
 
+        // Attitude degrees (pitch/roll; BF OSD_PITCH_ANGLE / OSD_ROLL_ANGLE).
+        if (el(OsdLayout.ATTITUDE)?.enabled == true) {
+            val e = el(OsdLayout.ATTITUDE)!!
+            val iv = Quaternionf(flight.attitude).conjugate()
+            val bu = Vector3f(0f, 1f, 0f).rotate(iv)
+            val bf = Vector3f(0f, 0f, -1f).rotate(iv)
+            val rDeg = Math.toDegrees(atan2(-bu.x, bu.y).toDouble())
+            val pDeg = Math.toDegrees(asin((-bf.y).coerceIn(-1f, 1f).toDouble()))
+            ctx.drawString(
+                font, String.format("P %+3.0f R %+3.0f", pDeg, rDeg), e.x, e.y, CYAN, true,
+            )
+        }
+
+        // Pack current (BF OSD_CURRENT).
+        if (el(OsdLayout.CURRENT)?.enabled == true) {
+            val e = el(OsdLayout.CURRENT)!!
+            ctx.drawString(
+                font, String.format("CUR %4.1fA", FpvClient.battery.currentA), e.x, e.y, GREEN, true,
+            )
+        }
+
+        // Consumed charge (BF OSD_MAH_DRAWN).
+        if (el(OsdLayout.MAH_DRAWN)?.enabled == true) {
+            val e = el(OsdLayout.MAH_DRAWN)!!
+            ctx.drawString(
+                font, String.format("MAH %4.0f", FpvClient.battery.mAhDrawn), e.x, e.y, GREEN, true,
+            )
+        }
+
         // Mode banner (centered).
         if (el(OsdLayout.MODE)?.enabled == true) {
             val modeTag = buildString {
@@ -160,30 +192,53 @@ object FpvOsd {
             )
         }
 
-        // ---- Center-anchored: artificial horizon + sidebars + crosshair ----
+        // ---- Center-anchored: artificial horizon + pitch ladder + sidebars ----
         val inv = Quaternionf(flight.attitude).conjugate()
         val bodyUp = Vector3f(0f, 1f, 0f).rotate(inv)
+        val bodyFwd = Vector3f(0f, 0f, -1f).rotate(inv)
         // Sign matches the camera so the OSD line overlays the true horizon as
         // seen in the already-rolled FPV picture (verified: roll-right 20 ->
         // true horizon -20 on screen, old sign drew +20).
         val roll = atan2(bodyUp.x, bodyUp.y)
-        // Pitch translation: world-up gains a screen-depth component [bodyUp.z]
-        // as the nose pitches; shift the horizon group vertically by that much
-        // (px per unit of body-up depth). SIGN IS BENCH-VERIFYABLE on first
-        // real flight -- if pitch draws the line the wrong way, negate the sign.
-        val pitchOffset = -bodyUp.z * HORIZON_PITCH_PX
+        // Current pitch relative to level (positive = nose down), from the same
+        // body/error convention used by the flight controller.
+        val currentPitchDeg = Math.toDegrees(
+            asin((-bodyFwd.y).coerceIn(-1f, 1f).toDouble())
+        ).toFloat()
+        // Synthetic-instrument vertical shift: nose-down pitches the view down,
+        // so the level horizon rises (negative GUI y). Verified by projecting the
+        // true horizon (screen y = -tan(pitch)); sign fixed in the cloud.
+        val groupDy = -currentPitchDeg * Defaults.OSD_PITCH_PX_PER_DEG
 
-        if (el(OsdLayout.ARTIFICIAL_HORIZON)?.enabled == true ||
-            el(OsdLayout.HORIZON_SIDEBARS)?.enabled == true
-        ) {
+        val showHorizon = el(OsdLayout.ARTIFICIAL_HORIZON)?.enabled == true
+        val showSidebars = el(OsdLayout.HORIZON_SIDEBARS)?.enabled == true
+        if (showHorizon || showSidebars) {
             val pose = ctx.pose()
             pose.pushMatrix()
-            pose.translate(cx.toFloat(), cy.toFloat() + pitchOffset)
+            pose.translate(cx.toFloat(), cy.toFloat() + groupDy)
             pose.rotate(roll)
-            if (el(OsdLayout.ARTIFICIAL_HORIZON)?.enabled == true) {
+            if (showHorizon) {
+                // Level reference line.
                 ctx.fill(-30, -1, 30, 1, GREEN_FILL)
+                // Pitch ladder: ticks at fixed degree references (both signs),
+                // positioned relative to the shifted group; hidden past range.
+                for (absL in Defaults.OSD_PITCH_LADDER_DEG) {
+                    for (signedL in intArrayOf(absL, -absL)) {
+                        val ly = signedL * Defaults.OSD_PITCH_PX_PER_DEG
+                        if (ly < -Defaults.OSD_PITCH_LADDER_RANGE_PX ||
+                            ly > Defaults.OSD_PITCH_LADDER_RANGE_PX
+                        ) continue
+                        val iy = ly.toInt()
+                        val h = Defaults.OSD_PITCH_TICK_HALF
+                        ctx.fill(-h, iy, h, iy + 1, GREEN_FILL)
+                        // Degree label to the right of the tick (rotates with roll).
+                        ctx.drawString(
+                            font, signedL.toString(), h + 2, iy - 3, GREEN, false,
+                        )
+                    }
+                }
             }
-            if (el(OsdLayout.HORIZON_SIDEBARS)?.enabled == true) {
+            if (showSidebars) {
                 ctx.fill(-36, -3, -30, 3, GREEN_FILL)
                 ctx.fill(30, -3, 36, 3, GREEN_FILL)
             }

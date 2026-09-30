@@ -38,6 +38,9 @@ object OsdLayout {
     const val BATTERY = "battery"
     const val LQ = "lq"
     const val FLIGHT_TIMER = "flight_timer"
+    const val ATTITUDE = "attitude"       // pitch/roll degrees (BF OSD_PITCH/ROLL_ANGLE)
+    const val CURRENT = "current"         // pack current, amps (BF OSD_CURRENT)
+    const val MAH_DRAWN = "mah_drawn"     // consumed charge (BF OSD_MAH_DRAWN)
     const val CENTER_WARNING = "center_warning" // transient, center-drawn, not movable
 
     /** Default layout; positions are guiScaled pixels. */
@@ -52,6 +55,9 @@ object OsdLayout {
         OsdElement(BATTERY, true, 8, 32),
         OsdElement(LQ, true, 8, 44),
         OsdElement(FLIGHT_TIMER, true, 8, 56),
+        OsdElement(ATTITUDE, false, 8, 80),
+        OsdElement(CURRENT, false, 8, 92),
+        OsdElement(MAH_DRAWN, false, 8, 104),
         OsdElement(CENTER_WARNING, true, 0, 0, centerAnchored = true),
     )
 }
