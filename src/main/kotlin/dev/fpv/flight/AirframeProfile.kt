@@ -104,12 +104,24 @@ class AirframeProfile {
 
     // ---- Behavior ----
     /**
-     * Propwash / realistic washout oscillation. When on, a small high-frequency
-     * disturbance is injected on the body-rate tracking; the PID loop sees it
-     * as a plant disturbance and rejects it (so it interacts with the PID).
-     * Engineering amplitude; default OFF.
+     * Propwash / realistic washout oscillation. When on, a high-frequency plant
+     * disturbance is injected ONLY in the washout regime (descending / settled in
+     * the own downwash at low airspeed and high throttle); clean fast forward flight
+     * stays smooth. Engineering amplitude; default OFF.
      */
     var propwashEnabled: Boolean = false
+
+    /** Gyro disturbance amplitude (dps) at full washout strength. */
+    var propwashAmpDps: Float = 16f
+    /** Lower / upper injected disturbance band, Hz (15-40 Hz regime). */
+    var propwashFreqLowHz: Float = 20f
+    var propwashFreqHighHz: Float = 31f
+    /** Fractional thrust drop at full washout strength. */
+    var propwashThrustDrop: Float = 0.15f
+    /** Descend rate (blocks/tick) at which washout strength saturates. */
+    var propwashDescentBpt: Float = 0.12f
+    /** Horizontal airspeed (blocks/tick) below which we are "settled" in downwash. */
+    var propwashSlowBpt: Float = 0.30f
 
     /**
      * PID behavior preset. "" / "PERFECT" = no rate override (use current rates);

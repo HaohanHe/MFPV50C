@@ -6,6 +6,26 @@ Semantic Versioning; `main` is the development branch and `stable` points at the
 latest fully verified (zero-warning build + all verification scripts PASS)
 revision. No formal GitHub Release is published until real-hardware acceptance.
 
+## [Unreleased] — Condition-driven prop-wash (washout disturbance)
+
+### Added
+- **`dev.fpv.flight.PropwashModel`** — headless-testable washout model. The old
+  always-on sine shim is gone; disturbance strength is now CONDITION-DRIVEN:
+  `strength = descentF * slowF * thrF` (falling through own downwash, low airspeed,
+  high power). Only then does it inject 15-40 Hz roll/pitch gyro noise and a
+  proportional thrust drop. Clean fast forward flight (fresh inflow) gets nothing.
+- New tunables on the airframe: `propwashAmpDps`, `propwashFreqLowHz/HighHz`,
+  `propwashThrustDrop`, `propwashDescentBpt`, `propwashSlowBpt`; whole effect switchable.
+- `FlightController.setTranslationState(vy, horizSpeed)` feeds the flight condition;
+  the disturbance is injected on the actual tracked rates in BOTH REAL and ARCADE
+  physics paths, and `propwashThrustScale` is folded into the thrust derate by the
+  translation mixin (washout loses lift).
+
+### Headless verification (PropwashTest, plain JVM)
+- Washout regime (descending, slow, high throttle): dominant freq ≈16 Hz (in 15-40),
+  rms gyro 6.8 dps, thrust scale 0.91 (drop). Clean forward: disturbance 0.0, scale 1.0.
+  Global toggle off -> silent. All PASS.
+
 ## [Unreleased] — P-A translational lift (body-up thrust, hover, aero, ground effect, sag)
 
 ### Added

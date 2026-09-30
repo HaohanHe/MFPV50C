@@ -55,6 +55,25 @@ class FlightController(val cfg: FpvConfig = FpvConfig()) {
     @JvmField
     var batteryDerate: Float = 1f
 
+    // ---- Translational state feeding the condition-driven prop-wash model ----
+    /** Latest vertical velocity (blocks/tick; negative = descending), set by the mixin. */
+    @JvmField
+    var transVy: Float = 0f
+
+    /** Latest horizontal airspeed (blocks/tick), set by the mixin. */
+    @JvmField
+    var transHoriz: Float = 0f
+
+    /** Prop-wash thrust multiplier (1 - drop*strength), latest step; mixin folds it into derate. */
+    @JvmField
+    var propwashThrustScale: Float = 1f
+
+    /** Called each tick by the translation mixin so prop-wash sees the flight condition. */
+    fun setTranslationState(vy: Float, horizSpeed: Float) {
+        transVy = vy
+        transHoriz = horizSpeed
+    }
+
     /** Crash detector + leveling suggestion. */
     private val crash = CrashRecovery()
 
@@ -336,16 +355,16 @@ class FlightController(val cfg: FpvConfig = FpvConfig()) {
             }
             trackedRates[b.index] += Math.toDegrees((axisTorque / i.coerceAtLeast(1e-6f)).toDouble()).toFloat() * dt
         }
-
-        // Propwash: small high-frequency plant disturbance on roll/pitch that the
-        // PID rate loop sees and partially rejects (hence it couples to the PID).
-        // Amplitude/frequency are engineering starting values; default off.
-        if (af.propwashEnabled) {
-            simTime += dt
-            trackedRates[0] += (18f * kotlin.math.sin(2.0 * Math.PI * 27.0 * simTime)).toFloat()
-            trackedRates[1] += (14f * kotlin.math.sin(2.0 * Math.PI * 31.0 * simTime + 0.7)).toFloat()
-        }
         } // end ARCADE tracking branch
+
+        // Condition-driven prop-wash (applies in BOTH physics modes): descending /
+        // settled in the own downwash at low airspeed + high throttle -> 15-40 Hz
+        // gyro shake + thrust drop; clean fast forward flight stays smooth.
+        val wash = PropwashModel(cfg.activeAirframe())
+        val washOut = wash.step(transVy, transHoriz, thr, dt)
+        trackedRates[0] += washOut.x()
+        trackedRates[1] += washOut.y()
+        propwashThrustScale = wash.thrustScale
 
         // Body-frame post-multiply integration; axis vectors from BodyAxis.
         // Integrate the tracked (actual) rates, not the commanded ones. Guard

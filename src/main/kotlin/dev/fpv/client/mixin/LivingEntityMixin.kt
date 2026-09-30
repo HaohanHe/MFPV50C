@@ -63,9 +63,15 @@ class LivingEntityMixin {
         var vy = if (player.deltaMovement.y.isFinite()) player.deltaMovement.y else 0.0
         var vz = if (player.deltaMovement.z.isFinite()) player.deltaMovement.z else 0.0
 
+        // Feed flight condition to the condition-driven prop-wash model, and fold its
+        // thrust drop into the derate (high-power descent into own wash loses lift).
+        val horiz = Math.sqrt(vx * vx + vz * vz)
+        FpvClient.flight.setTranslationState(vy.toFloat(), horiz.toFloat())
+        val totalDerate = derate * FpvClient.flight.propwashThrustScale
+
         val d = dyn.step(
             FpvClient.flight.attitude, FpvClient.throttle,
-            vx, vy, vz, agl, derate,
+            vx, vy, vz, agl, totalDerate,
             cfg.reversible3D, cfg.threeDThrottleDeadband,
         )
         vx += d.x().toDouble()
