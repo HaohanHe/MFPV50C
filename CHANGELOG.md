@@ -6,6 +6,36 @@ Semantic Versioning; `main` is the development branch and `stable` points at the
 latest fully verified (zero-warning build + all verification scripts PASS)
 revision. No formal GitHub Release is published until real-hardware acceptance.
 
+## [Unreleased] — Flight-mode parity with Betaflight (3D reversible physics / Horizon / Angle / PID)
+
+### Added
+- **Reversible-3D rotational physics** (`flight/RealDynamics.kt`): the per-motor command is now
+  signed `m ∈ [-1,1]` when `cfg.reversible3D`, tracking `sign(u)*sqrt(|u|)` through the motor
+  first-order lag. Per-motor lift and reaction torque carry `m*|m|`, so reversing the motors flips
+  the roll/pitch **and** the yaw reaction-torque moments together — exactly like a reversible-3D
+  airframe. Below the 3D throttle deadband the collective is ~0 (zero net thrust); normal flight is
+  unchanged (`m≥0 ⇒ m*|m| = m²`). Pairs with the already-implemented bidirectional vertical thrust
+  in `TranslationalDynamics`. Headless [22]: up-thrust +0.138 / reverse-thrust −0.238 / mid −0.05;
+  yaw demand forward and reversed give the same 451 dps direction (loop not flipped); mid settles ~0.
+- **Horizon leveling strength now fades with bank angle + rise-smoothing**
+  (`flight/AngleController.horizonRates`, per BF `pid.c:542-561`):
+  `strength = max((135°−|inclination|)/135°,0) · max(1−|stick|,0)` then passed through a rise-limited
+  PT1 (`HORIZON_SMOOTH_TAU_SEC`=0.5s; smooth up, immediate down). Center stick/level = full leveling,
+  full stick/steep bank = full acro. Headless [23]: level 0.99 → bank60 0.56 → bank120 0.11, full
+  stick 0, first step 0.01 (rise-limited).
+
+### Changed
+- **ANGLE default max inclination 50 → 60 deg** (`Defaults.ANGLE_MAX_DEG`), matching BF `angle_limit`.
+  Headless [24].
+- **I-term relax uses the BF hard threshold** `max(0, 1 − hpf/40 dps)`
+  (`RatePidController.kt`) instead of the asymptotic `1/(1+k|x|)`; at/above 40 dps the integrator is
+  fully frozen (setpoint- or gyro-keyed, RP/RPY/OFF scope unchanged).
+- **Airmode low-throttle authority floor** (`Defaults.AIRMODE_LOW_THROTTLE_AUTHORITY`, default 0 = off):
+  parameterized minimum mixer authority retained below `AIRMODE_ENGAGE_THROTTLE`=0.2 so attitude control
+  persists the instant the craft leaves the ground. Default no-op; no change to validated feel.
+- Default Roll/Pitch/Yaw PID confirmed equal to BF published values (45/80/30/120, 47/84/34/125,
+  45/80/0/120; yaw D=0) — now pinned by headless [25].
+
 ## [Unreleased] — P2 cloud-verifiable fixes (track atomicity / monitor hand-mode / yaw ceiling / OSD horizon)
 
 ### Fixed

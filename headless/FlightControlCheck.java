@@ -748,6 +748,102 @@ public class FlightControlCheck {
       }
     }
 
+    // ---------- 22. 3D reversible-thrust physics (signed motor) ----------
+    System.out.println("\n[22] 3D reversible-3D: negative stick -> reverse thrust + stable reversed yaw");
+    {
+      FpvConfig cfg = new FpvConfig();
+      cfg.setReversible3D(true);
+      float dead = cfg.getThreeDThrottleDeadband();
+
+      // (a) Vertical thrust sign via TranslationalDynamics (level attitude, far from ground).
+      TranslationalDynamics td = new TranslationalDynamics(cfg.activeAirframe());
+      Quaternionf level = new Quaternionf();
+      float dyUp   = td.step(level,  0.5f, 0,0,0, 100f, 1f, true, dead).y();
+      float dyDown = td.step(level, -0.5f, 0,0,0, 100f, 1f, true, dead).y();
+      float dyMid  = td.step(level,  0.02f,0,0,0, 100f, 1f, true, dead).y(); // inside deadband
+      System.out.printf("    vertical accel  up=%.4f  reverse=%.4f  mid(deadband)=%.4f%n", dyUp, dyDown, dyMid);
+      check("3D positive throttle pushes UP", dyUp > dyDown, "up="+String.format("%.4f",dyUp));
+      check("3D negative throttle pushes DOWN (thrust reversed)", dyDown < dyUp, "rev="+String.format("%.4f",dyDown));
+      check("3D mid deadband gives gravity-only fall (no thrust, between reverse and up)",
+        dyDown < dyMid && dyMid < dyUp && dyMid < 0f, "mid="+String.format("%.4f",dyMid));
+
+      // (b) Rotational: yaw loop stays the SAME direction & finite in reverse; zero at mid.
+      dev.fpv.flight.RatePidController pid = new dev.fpv.flight.RatePidController(cfg);
+      dev.fpv.flight.RealDynamics rd = new dev.fpv.flight.RealDynamics(cfg, pid);
+      float yawSp = cfg.getYaw().getMax();
+      float[] sp = new float[]{0f, 0f, yawSp};
+      for (int i = 0; i < (int)(0.6 / DT); i++) rd.step(new float[]{0,0,0}, 0.5f, (float) DT, 1f);
+      for (int i = 0; i < (int)(1.2 / DT); i++) rd.step(sp, 0.5f, (float) DT, 1f);
+      float yawFwd = rd.getRatesDps()[2];
+      for (int i = 0; i < (int)(1.5 / DT); i++) rd.step(sp, -0.5f, (float) DT, 1f);
+      float yawRev = rd.getRatesDps()[2];
+      // mid collective + ZERO attitude demand -> motors settle to ~0, residual rate decays
+      for (int i = 0; i < (int)(1.5 / DT); i++) rd.step(new float[]{0,0,0}, 0.0f, (float) DT, 1f);
+      float yawMid = rd.getRatesDps()[2];
+      System.out.printf("    yaw rate dps  forward=%.1f  reversed=%.1f  mid=%.2f%n", yawFwd, yawRev, yawMid);
+      check("forward yaw demand produces a finite rate", Math.abs(yawFwd) > 20f && Float.isFinite(yawFwd), "fwd="+yawFwd);
+      check("reversed thrust keeps SAME yaw direction (loop not flipped)", Math.signum(yawFwd) == Math.signum(yawRev) && Math.abs(yawRev) > 10f, "rev="+yawRev);
+      check("mid throttle gives ~zero yaw authority (no NaN)", Float.isFinite(yawMid) && Math.abs(yawMid) < 30f, "mid="+yawMid);
+    }
+
+    // ---------- 23. Horizon strength fades with bank angle + rise-smoothed ----------
+    System.out.println("\n[23] Horizon: leveling strength fades with bank angle; rise PT1-smoothed");
+    {
+      FpvConfig cfg = new FpvConfig();
+      java.util.function.Function<Float,Quaternionf> bank = (rollDeg) ->
+        new Quaternionf().rotationYXZ((float)Math.PI, 0f, -(float)Math.toRadians(rollDeg));
+
+      // rise smoothing: a FRESH controller at level+center should start weak and build up.
+      dev.fpv.flight.AngleController fresh = new dev.fpv.flight.AngleController();
+      fresh.horizonRates(sticks(), bank.apply(0f), (float) DT, cfg);
+      float sFirst = fresh.getHorizonStrength();
+
+      dev.fpv.flight.AngleController ac = new dev.fpv.flight.AngleController();
+      StickChannels c = sticks();
+      float[] str = new float[3];
+      float[] banks = new float[]{0f, 60f, 120f};
+      for (int b = 0; b < 3; b++) {
+        for (int i = 0; i < 500; i++) ac.horizonRates(c, bank.apply(banks[b]), (float) DT, cfg);
+        str[b] = ac.getHorizonStrength();
+      }
+      StickChannels s2 = sticks(); s2.roll = 1f;
+      for (int i = 0; i < 200; i++) ac.horizonRates(s2, bank.apply(0f), (float) DT, cfg);
+      float sStick = ac.getHorizonStrength();
+      System.out.printf("    strength  level=%.2f  bank60=%.2f  bank120=%.2f  fullstick=%.2f  firstStep=%.3f%n",
+        str[0], str[1], str[2], sStick, sFirst);
+      check("level attitude -> near-full leveling (~1)", str[0] > 0.9f, "lvl="+str[0]);
+      check("leveling fades as bank grows (1 > 60 > 120 deg)", str[0] > str[1] && str[1] > str[2],
+        "1=" + String.format("%.2f",str[0])+" 60="+String.format("%.2f",str[1])+" 120="+String.format("%.2f",str[2]));
+      check("bank60 strength ~ (135-60)/135=0.56", Math.abs(str[1]-0.56f) < 0.12f, "b60="+str[1]);
+      check("full stick -> acro (strength ~0)", sStick < 0.05f, "stk="+sStick);
+      check("rise is PT1-smoothed (first step << settled)", sFirst < 0.3f && sFirst < str[0], "first="+sFirst);
+    }
+
+    // ---------- 24. Angle mode max inclination = 60 deg (BF angle_limit) ----------
+    System.out.println("\n[24] ANGLE mode: default max inclination = 60 deg");
+    {
+      FpvConfig cfg = new FpvConfig();
+      check("default angleMaxDeg == 60", Math.abs(cfg.getAngleMaxDeg()-60f) < 0.01f, "max="+cfg.getAngleMaxDeg());
+      dev.fpv.flight.AngleController ac = new dev.fpv.flight.AngleController();
+      StickChannels full = sticks(); full.roll = 1f; full.pitch = 1f;
+      ac.angleRates(full, new Quaternionf(), (float) DT, cfg);
+      check("full stick commands target inclination clamped to 60 deg",
+        Math.abs(ac.getTargetRollDeg()-60f) < 0.5f && Math.abs(ac.getTargetPitchDeg()-60f) < 0.5f,
+        "r="+ac.getTargetRollDeg()+" p="+ac.getTargetPitchDeg());
+    }
+
+    // ---------- 25. Default PID matches Betaflight published values ----------
+    System.out.println("\n[25] Default PID == BF (R 45/80/30/120, P 47/84/34/125, Y 45/80/0/120)");
+    {
+      FpvConfig cfg = new FpvConfig();
+      var rollP = cfg.getPid().getRoll(); var pitchP = cfg.getPid().getPitch(); var yawP = cfg.getPid().getYaw();
+      System.out.printf("    R %.0f/%.0f/%.0f/%.0f  P %.0f/%.0f/%.0f/%.0f  Y %.0f/%.0f/%.0f/%.0f%n",
+        rollP.getP(),rollP.getI(),rollP.getD(),rollP.getF(), pitchP.getP(),pitchP.getI(),pitchP.getD(),pitchP.getF(), yawP.getP(),yawP.getI(),yawP.getD(),yawP.getF());
+      check("roll P/I/D/F = 45/80/30/120", rollP.getP()==45f&&rollP.getI()==80f&&rollP.getD()==30f&&rollP.getF()==120f, "");
+      check("pitch P/I/D/F = 47/84/34/125", pitchP.getP()==47f&&pitchP.getI()==84f&&pitchP.getD()==34f&&pitchP.getF()==125f, "");
+      check("yaw P/I/D/F = 45/80/0/120 (yaw D=0)", yawP.getP()==45f&&yawP.getI()==80f&&yawP.getD()==0f&&yawP.getF()==120f, "");
+    }
+
     System.out.println("\n========================================");
     System.out.println(failures == 0 ? "ALL TESTS PASS" : ("FAILURES: " + failures));
     System.exit(failures == 0 ? 0 : 1);
