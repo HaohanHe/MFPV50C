@@ -31,6 +31,9 @@
 package dev.fpv.flight
 
 import kotlin.math.PI
+import kotlin.math.abs
+import kotlin.math.max
+import kotlin.math.sign
 import kotlin.math.sqrt
 
 class RealDynamics(
@@ -95,44 +98,62 @@ class RealDynamics(
         // 2. Quad-X mixer: motor = collective + per-axis authority * differential.
         //    Roll/pitch use thrust differential (small swing); yaw uses reaction
         //    torque and needs a larger motor-fraction swing.
-        val pitchAuth = af.pitchAuthority.coerceIn(0f, 0.8f)
-        val rollAuth = af.rollAuthority.coerceIn(0f, 0.8f)
+        //
+        //    Reversible-3D: the collective is signed (-1..1, 0 = zero net thrust).
+        //    Below the deadband the motors command ~0 (free-wheel, zero lift), and a
+        //    negative collective reverses them. Motor speed m is signed; lift and
+        //    reaction torque carry m*|m| so reversing flips both the roll/pitch and
+        //    the yaw reaction-torque moments automatically (see step 4).
+        val threeD = cfg.reversible3D
+        var thrEff = thr
+        if (threeD && abs(thrEff) < cfg.threeDThrottleDeadband) thrEff = 0f
+
+        // Airmode floor: at low collective keep a minimum mixer authority so the
+        // craft is attitude-controlled the moment it leaves the ground (0 = off).
+        val airFloor = Defaults.AIRMODE_LOW_THROTTLE_AUTHORITY
+        val lowColl = thrEff < Defaults.AIRMODE_ENGAGE_THROTTLE
+        val pitchAuth = (if (airFloor > 0f && lowColl) max(af.pitchAuthority, airFloor) else af.pitchAuthority).coerceIn(0f, 0.8f)
+        val rollAuth = (if (airFloor > 0f && lowColl) max(af.rollAuthority, airFloor) else af.rollAuthority).coerceIn(0f, 0.8f)
         val yawAuth = af.yawAuthority.coerceIn(0f, 0.9f)
         val u = FloatArray(4)
         for (i in 0..3) {
             val row = MixerTables.QUAD_X[i]
-            val cmd = thr +
+            val cmd = thrEff +
                 pitchAuth * d[BodyAxis.PITCH.index] * row[MixerTables.PITCH] +
                 rollAuth * d[BodyAxis.ROLL.index] * row[MixerTables.ROLL] +
                 yawAuth * d[BodyAxis.YAW.index] * row[MixerTables.YAW]
-            u[i] = cmd.coerceIn(af.minThrottle, 1f)
+            u[i] = if (threeD) cmd.coerceIn(-1f, 1f) else cmd.coerceIn(af.minThrottle, 1f)
         }
 
-        // 3. Motor first-order lag: m tracks sqrt(u).
+        // 3. Motor first-order lag: m tracks sign(u)*sqrt(|u|).
+        //    In normal mode u >= minThrottle > 0, so this degenerates to sqrt(u).
         val tau = af.motorTauSec.coerceAtLeast(1e-3f)
         val k = (h / (tau + h)).coerceIn(0f, 1f)
         for (i in 0..3) {
-            val target = sqrt(u[i].coerceIn(0f, 1f))
+            val target = sign(u[i]) * sqrt(abs(u[i]))
             motor[i] += k * (target - motor[i])
             if (!motor[i].isFinite()) motor[i] = 0f
         }
 
-        // 4. Moments.
+        // 4. Moments. thrust_i and reaction torque both carry signedSq = m*|m|:
+        //    m>0 (spin up) gives normal lift/counter-torque; m<0 (3D reverse) flips
+        //    the sign, so roll/pitch/yaw moments all reverse together as on a real
+        //    reversible-3D copter. In normal flight m>=0, so signedSq == m^2.
         val darm = af.armLength / sqrt(2f)
         var tauX = 0f
         var tauY = 0f
         var tauZ = 0f
         for (i in 0..3) {
             val row = MixerTables.QUAD_X[i]
-            val m2 = motor[i] * motor[i]
-            val thrust = af.maxThrustPerMotorN * m2 * der
+            val signedSq = motor[i] * abs(motor[i])
+            val thrust = af.maxThrustPerMotorN * signedSq * der
             // right motors i=0,1 have x=+darm; rear motors i=0,2 have z=+darm.
             val xi = if (i == 0 || i == 1) darm else -darm
             val zi = if (i == 0 || i == 2) darm else -darm
             tauX += -zi * thrust
             tauZ += xi * thrust
             // Reaction (counter-)torque about +Y; spin sign = yaw mixer column.
-            tauY += -row[MixerTables.YAW] * af.reactionTorquePerMotorNm * m2 * der
+            tauY += -row[MixerTables.YAW] * af.reactionTorquePerMotorNm * signedSq * der
         }
 
         // 5. Rigid body: I*w_dot = tau - w x (I w) - b*w.
