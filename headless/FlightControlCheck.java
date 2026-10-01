@@ -1569,6 +1569,18 @@ public class FlightControlCheck {
       check("heat finished", heat.getFinished(), "");
     }
 
+    // ---------- 45. Boost thrust envelope ----------
+    System.out.println("\n[45] boost thrust scale");
+    {
+      var bm = dev.fpv.race.BoostModel.INSTANCE;
+      double base = bm.thrustScale(false);
+      double boost = bm.thrustScale(true);
+      System.out.printf("    base=%.2f boost=%.2f gain=%.2fx%n", base, boost, boost/base);
+      check("base scale = 1.0", Math.abs(base-1.0)<1e-9, ""+base);
+      check("boost scale = 1.5", Math.abs(boost-1.5)<1e-9, ""+boost);
+      check("boost gain > baseline", boost>base, "");
+    }
+
     System.out.println("\n========================================");
     System.out.println(failures == 0 ? "ALL TESTS PASS" : ("FAILURES: " + failures));
     System.exit(failures == 0 ? 0 : 1);

@@ -8,6 +8,19 @@ revision. No formal GitHub Release is published until real-hardware acceptance.
 
 ## [Unreleased] — OSD refactor: data-driven element registry
 
+### Fixed (e2e audit v2: P0 latch runaway + P1)
+- **E2E-001 (P0)**: RaceTimingCore now pushes events to a one-shot queue (`drainEvents()`), no
+  latched `lastEvent`; RaceManager drains once per frame — penalty no longer accumulates every
+  tick (was +30s → 9000s runaway). Headless: legal start penalty=0, 300 open frames stay 0.
+- **E2E-002**: crossing the timing gate index 0 is the legitimate start (no countdown by default);
+  JUMP_START only fires when `stagingActive` (optional countdown, default off). Parameterised
+  `falseStartOnlyWithStaging`.
+- **E2E-004**: `GateDef.intersect` now rejects reverse crossings (dot<=0), matching GateGeo.
+- **E2E-005**: headless [44] full 2-gate loop with boost → 2 valid laps/splits/avg3; [45] boost
+  thrust scale 1.5x (`BoostModel`, client-only envelope).
+- **E2E-003**: BOOST emits event + opens an 800ms window; `BoostModel.thrustScale`=1.5. Wiring
+  into the live translational link = 需真机 (remote path is client-only no-op).
+
 ### Changed (race: RaceManager now delegates to the pure timing core)
 - `RaceManager.startHeat()` builds a `RaceTimingCore` from the track gates and arms it;
   `onFrame()` feeds eye positions to `core.step(...)`. Core now the single source for boost
