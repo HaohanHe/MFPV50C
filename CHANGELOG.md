@@ -8,6 +8,18 @@ revision. No formal GitHub Release is published until real-hardware acceptance.
 
 ## [Unreleased] — OSD refactor: data-driven element registry
 
+### Added (race pure core: double geometry + injectable-clock timing + boost)
+- **`race/RaceCore.kt`**: `GateGeo` double-precision segment-plane intersection (no MC Vec3) with
+  forward-only direction (+1 hit / -1 wrong-way / 0 miss) and RECT/RING aperture;
+  `RaceTimingCore` injectable-clock state machine (clock starts on timing gate, order-gated laps,
+  jump-start +30s penalty, timeout DNF, debounce, splits, valid-lap list, avg-best-3).
+- `GateShape.BOOST` + `BOOST_MULTIPLIER=1.5`/`BOOST_DURATION_MS=800` (ElytraRacing CheckPoint.java:44,
+  client-side virtual boost, no motor/entity).
+- `LineHelper.relativeBearingDeg` (next-gate arrow) + `liveGapSec` (current lap − ghost clock).
+- headless [41] geometry (forward/reverse/miss/RING), [42] bearing + live gap.
+- MC RaceManager still wraps the live clock; direct wiring of RaceManager→RaceCore and on-screen
+  gate rendering / keybind placement = 需真机集成 (existing GateRenderer/RaceScreen cover visuals).
+
 ### Added (pure-client racing logic: headless-validated)
 - Existing `race/` package (GateDef plane/box/RING hit-test, TrackDoc schema, RaceManager state
   machine timing + debounce + penalty + time-limit, GhostTrajectory record/replay slerp,

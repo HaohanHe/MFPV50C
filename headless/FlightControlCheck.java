@@ -1453,6 +1453,80 @@ public class FlightControlCheck {
       check("safeName strips path chars", dev.fpv.race.TrackStore.INSTANCE.safeName("a/b\\c").equals("a_b_c"), dev.fpv.race.TrackStore.INSTANCE.safeName("a/b\\c"));
     }
 
+    // ---------- 41. Pure race core: double geometry, injectable-clock timing, boost, penalties ----------
+    System.out.println("\n[41] RaceCore: gate geometry / order / jump-start / boost / laps");
+    {
+      // double geometry: forward hit, reverse wrong-way, miss outside.
+      var geo = dev.fpv.race.GateGeo.INSTANCE;
+      var fwdN = geo.forward(0f, 0f); // +Z
+      int hit = geo.intersect(0,0,-2, 0,0,2,  0,0,0, fwdN[0],fwdN[1],fwdN[2], 1.0,1.0, false);
+      check("geo forward inside aperture -> hit", hit==1, ""+hit);
+      int rev = geo.intersect(0,0,2, 0,0,-2,  0,0,0, fwdN[0],fwdN[1],fwdN[2], 1.0,1.0, false);
+      check("geo reverse -> wrong-way", rev==-1, ""+rev);
+      int out = geo.intersect(5,0,-2, 5,0,2,  0,0,0, fwdN[0],fwdN[1],fwdN[2], 1.0,1.0, false);
+      check("geo outside aperture -> miss", out==0, ""+out);
+      int ringHit = geo.intersect(0.5,0,-2, 0.5,0,2,  0,0,0, fwdN[0],fwdN[1],fwdN[2], 1.0,1.0, true);
+      int ringMiss = geo.intersect(1.5,0,-2, 1.5,0,2,  0,0,0, fwdN[0],fwdN[1],fwdN[2], 1.0,1.0, true);
+      check("geo RING inside radius -> hit", ringHit==1, ""+ringHit);
+      check("geo RING outside radius -> miss", ringMiss==0, ""+ringMiss);
+
+      // Injectable-clock timing: single gate0 at z=0 (+Z).
+      long[] clock = {0L};
+      var g0 = new dev.fpv.race.CoreGate(0,0,0, 0,0,1, 1.0,1.0, false, false);
+      var core = new dev.fpv.race.RaceTimingCore(
+        java.util.List.of(g0), /*laps*/1, /*limitNs*/1_000_000_000_000L, /*debounce*/1_000L,
+        /*jumpPen*/30_000_000_000L, /*boostDur*/800_000_000L, () -> clock[0]);
+      core.arm();
+      for (double z=-2; z<=-0.2; z+=0.31) { clock[0]+=30_000_000L; core.step(0,0,z); }
+      check("clock NOT started before timing gate", !core.getClockStarted(), "");
+      for (double z=0.13; z<=5; z+=0.31) { clock[0]+=30_000_000L; core.step(0,0,z); }
+      check("clock started after gate0", core.getClockStarted(), "");
+      for (double z=4.7; z>=-2.3; z-=0.31) { clock[0]+=30_000_000L; core.step(0,0,z); }
+      System.out.printf("    laps=%d validLaps=%d finished=%b%n",
+        core.getLapsCompleted(), core.getValidLapsNs().size(), core.getFinished());
+      check("one valid lap recorded", core.getValidLapsNs().size()==1, ""+core.getValidLapsNs().size());
+      check("lap completes -> finished", core.getFinished(), "");
+
+      // Boost gate g1 at z=10.
+      clock[0]=0L;
+      var g1 = new dev.fpv.race.CoreGate(0,0,10, 0,0,1, 1.0,1.0, false, true);
+      var cB = new dev.fpv.race.RaceTimingCore(java.util.List.of(g1), 1, 1_000_000_000_000L, 1_000L, 30_000_000_000L, 800_000_000L, () -> clock[0]);
+      cB.arm();
+      for (double z=-2; z<=9.0; z+=0.31) { clock[0]+=30_000_000L; cB.step(0,0,z); }
+      check("boost not active before gate", !cB.boostActive(), "");
+      for (double z=9.3; z<=11; z+=0.31) { clock[0]+=30_000_000L; cB.step(0,0,z); }
+      check("boost active right after boost gate", cB.boostActive(), "");
+      System.out.printf("    boostUntilNs=%d clock=%d%n", cB.getBoostUntilNs(), clock[0]);
+
+      // Jump start: arm then immediately cross gate0 -> +30s penalty.
+      var c2 = new dev.fpv.race.RaceTimingCore(java.util.List.of(g0), 1, 1_000_000_000_000L, 1_000L, 30_000_000_000L, 800_000_000L, () -> clock[0]);
+      c2.arm();
+      clock[0]+=1_000_000L; c2.step(0,0,-2); c2.step(0,0,2); // cross gate0 while still armed
+      System.out.printf("    jumpStart penaltyNs=%d event=%s%n", c2.getPenaltyNs(), c2.getLastEvent());
+      check("jump start +30s penalty", c2.getPenaltyNs()==30_000_000_000L, ""+c2.getPenaltyNs());
+      check("jump-start event", c2.getLastEvent()==dev.fpv.race.CoreEvent.JUMP_START, String.valueOf(c2.getLastEvent()));
+    }
+
+    // ---------- 42. LineHelper bearing + live gap ----------
+    System.out.println("\n[42] LineHelper next-gate bearing + live gap");
+    {
+      var lh = dev.fpv.race.LineHelper.INSTANCE;
+      // Drone at origin facing +Z (yaw=0); gate straight ahead (+Z) -> 0.
+      double fwd = lh.relativeBearingDeg(0,0, 0f, 0, 10);
+      check("gate straight ahead -> 0 deg", Math.abs(fwd)<1e-6, ""+fwd);
+      // Gate to the right (-X) -> +90.
+      double right = lh.relativeBearingDeg(0,0, 0f, -10, 0);
+      System.out.printf("    bearing straight=%.2f right=%.2f%n", fwd, right);
+      check("gate to the right -> ~+90", Math.abs(right-90.0)<1.0, ""+right);
+      // Gate behind -> ~+/-180.
+      double back = lh.relativeBearingDeg(0,0, 0f, 0, -10);
+      check("gate behind -> ~180", Math.abs(Math.abs(back)-180.0)<1.0, ""+back);
+      // Live gap: current lap 5.2s, ghost 5.0s -> +0.2 behind.
+      double gap = lh.liveGapSec(5_200_000_000L, 5_000_000_000L);
+      System.out.printf("    liveGap=%.2f s%n", gap);
+      check("live gap +0.2 behind", Math.abs(gap-0.2)<1e-6, ""+gap);
+    }
+
     System.out.println("\n========================================");
     System.out.println(failures == 0 ? "ALL TESTS PASS" : ("FAILURES: " + failures));
     System.exit(failures == 0 ? 0 : 1);

@@ -122,4 +122,14 @@ enum class GateShape {
 
     /** Avoid-obstacle / ring marker: fly around, free space 2.5 m. */
     RING,
+
+    /** Boost gate: crossing gives a brief client-side speed boost. [ElytraRacing CheckPoint.java:44] */
+    BOOST,
 }
+
+// ---- C. boost gate defaults (client-side virtual boost, no motor/entity) ----
+/** Boost speed multiplier while active. */
+const val BOOST_MULTIPLIER = 1.5
+/** Boost effect duration after crossing a BOOST gate, ms. */
+const val BOOST_DURATION_MS = 800L
+
