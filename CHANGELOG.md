@@ -8,6 +8,15 @@ revision. No formal GitHub Release is published until real-hardware acceptance.
 
 ## [Unreleased] — OSD refactor: data-driven element registry
 
+### Added (pure-client racing logic: headless-validated)
+- Existing `race/` package (GateDef plane/box/RING hit-test, TrackDoc schema, RaceManager state
+  machine timing + debounce + penalty + time-limit, GhostTrajectory record/replay slerp,
+  TrackStore atomic save) now pinned by headless [40]: gate shape parse + RING fallback,
+  TrackDoc Gson round-trip (gates/pos/shape/best ms), atomic write leaves no .tmp, ghost
+  quaternion, racing OFF by default (zero freestyle impact), safeName sanitisation.
+- GateDef.intersect (Vec3 plane crossing) and the nanoTime timing engine are MC-runtime-bound;
+  live forward/back/order/penalty behaviour = 需真机集成验证.
+
 ### Added (signal bands: discrete LQ-driven chain switching)
 - **`flight/SignalBands.kt`**: CLEAN/MILD/HEAVY/FROZEN bands from badness (=1-LQ), with
   hysteresis deadband (UP_MILD 0.10 / DN_MILD 0.06, UP_HEAVY 0.25 / DN_HEAVY 0.18,

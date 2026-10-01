@@ -218,7 +218,7 @@ public class FlightControlCheck {
     return p.getX();
   }
 
-  public static void main(String[] a) {
+  public static void main(String[] a) throws java.io.IOException {
     System.out.println("=== REAL FlightController headless verification (dt=" + DT + "s) ===");
 
     // ---------- 1. three-axis step: finite non-instant rise, reach near setpoint ----------
@@ -1416,6 +1416,41 @@ public class FlightControlCheck {
       var sel2 = sb.selectChain(0.3, CLEAN, 999);
       System.out.printf("    selectChain bad=0.3 -> %s / %s%n", sel2.getFirst(), sel2.getSecond());
       check("no NaN in thresholds", !Double.isNaN(sb.UP_MILD) && !Double.isNaN(sb.UP_FROZEN), "");
+    }
+
+    // ---------- 40. Pure-client racing: gate geometry / serialization / ghost / off-zero ----------
+    System.out.println("\n[40] racing: gate hit-test, track round-trip, ghost, off=zero-effect");
+    {
+      // Gate aperture shape parsing (pure; Vec3 plane-intersect needs MC runtime).
+      var g = new dev.fpv.race.GateDef(0,0,0, 0f,0f, 2f,2f, 0, "RECTANGLE");
+      check("gate shape RECTANGLE", g.gateShape()==dev.fpv.race.GateShape.RECTANGLE, "");
+      var ring = new dev.fpv.race.GateDef(0,0,0, 0f,0f, 2f,2f, 0, "RING");
+      check("gate shape RING", ring.gateShape()==dev.fpv.race.GateShape.RING, "");
+      check("gate shape unknown -> RECTANGLE fallback", new dev.fpv.race.GateDef(0,0,0,0f,0f,1f,1f,0,"WEIRD").gateShape()==dev.fpv.race.GateShape.RECTANGLE, "");
+
+      // Track serialization round-trip via AtomicFiles (no .tmp left).
+      var doc = new dev.fpv.race.TrackDoc();
+      doc.setName("t_roundtrip");
+      doc.getGates().add(new dev.fpv.race.GateDef(1,2,3, 45f,0f, 1.5f,1.5f, 0, "RECTANGLE"));
+      doc.getGates().add(new dev.fpv.race.GateDef(4,5,6, 90f,0f, 2f,2f, 1, "RING"));
+      doc.setBestRoundMs(12345L);
+      java.nio.file.Path td = java.nio.file.Files.createTempDirectory("trackrt");
+      var trackFile = td.resolve("t.json");
+      dev.fpv.race.TrackStore.saveTo(trackFile, doc);
+      check("atomic write left no .tmp", td.toFile().listFiles((d,n)->n.endsWith(".tmp")).length==0, "");
+      var back = new com.google.gson.GsonBuilder().create().fromJson(java.nio.file.Files.readString(trackFile), dev.fpv.race.TrackDoc.class);
+      check("track round-trip: gate count", back.getGates().size()==2, ""+back.getGates().size());
+      check("track round-trip: gate pos/shape", back.getGates().get(0).getX()==1.0 && back.getGates().get(1).getShape().equals("RING"), back.getGates().get(1).getShape());
+      check("track round-trip: best ms", back.getBestRoundMs()==12345L, ""+back.getBestRoundMs());
+
+      // Ghost record/replay quaternion consistency.
+      var gs = new dev.fpv.race.GhostSample(0.5f, 1,2,3, 0f,0f,0f,1f, 0.5f);
+      check("ghost quaternion identity", gs.quaternion().w()==1f && gs.quaternion().x()==0f, "");
+
+      // Racing OFF by default -> zero effect on freestyle.
+      FpvConfig rc = new FpvConfig();
+      check("racing disabled by default", (rc.getRace()==null || !rc.getRace().getRaceEnabled()), "raceEnabled="+(rc.getRace()==null?"null":rc.getRace().getRaceEnabled()));
+      check("safeName strips path chars", dev.fpv.race.TrackStore.INSTANCE.safeName("a/b\\c").equals("a_b_c"), dev.fpv.race.TrackStore.INSTANCE.safeName("a/b\\c"));
     }
 
     System.out.println("\n========================================");
