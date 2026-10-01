@@ -211,6 +211,16 @@ class ServerCompatConfig {
     /** Rubber-band / setback reaction: accept server position, back off boost/turn. */
     var antiKick: Boolean = true
 
+    /**
+     * Absolute-position correction larger than this many blocks between the client
+     * prediction and the server packet is classified as a rubber-band setback
+     * (normal small corrections / single-player never trip it).
+     */
+    var setbackThresholdBlocks: Float = Defaults.SETBACK_THRESHOLD_BLOCKS
+
+    /** Minimum ms between two setback reactions (debounce). */
+    var setbackCooldownMs: Long = Defaults.SETBACK_COOLDOWN_MS
+
     /** Cap horizontal speed (remote only; creative / single-player never limited). */
     var softSpeedLimit: Boolean = false
 

@@ -43,6 +43,10 @@ object Defaults {
     const val RATES_TYPE_LEGACY = "LEGACY"
     const val RATES_TYPE_QUICK = "QUICK"
 
+    // ---- Remote setback (rubber-band) detection (blocks / ms) ----
+    const val SETBACK_THRESHOLD_BLOCKS = 2.0f
+    const val SETBACK_COOLDOWN_MS = 800L
+
     // ---- Legacy (Betaflight rcRate/superRate) published configurator defaults ----
     const val LEGACY_RC_RATE = 2.0f
     const val LEGACY_SUPER_RATE = 0.7f

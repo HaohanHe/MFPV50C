@@ -20,15 +20,24 @@ revision. No formal GitHub Release is published until real-hardware acceptance.
   the ACRO setpoint map now branches on the selected type, activating the previously
   dead `Rates.legacy` (rcRate/superRate) and `Rates.quick` branches. BF import sets
   rateType automatically. GUI cycle button on the advanced page.
+- **Remote rubber-band setback wiring** (`flight/SetbackDetector.kt` pure classifier;
+  `ClientPacketListenerMixin` on `handleMovePlayer`): absolute position snaps farther
+  than `setbackThresholdBlocks` (default 2.0, debounced by `setbackCooldownMs`=800)
+  now actually invoke `ServerCompatLogic.onSetback()` — firework interval widens
+  10→40 ticks and the coordinated-turn gain softens. Relative-axis deltas and small
+  corrections never trip it; single-player never reaches this path.
 
 ### Fixed
 - `AxisRates` gained legacy-only `rcRate`/`superRate` fields (defaults 2.0/0.7);
   ACTUAL/QUICK behaviour unchanged (default values identical to before).
+- `ServerCompatLogic.onSetback()` previously had zero callers (dead wire); the
+  packet mixin + `FpvClient` event bus now connect detection → reaction.
 
 ### Verification
 - headless [13] actual+legacy CLI samples parse correctly, out-of-range line captured;
   [14] same roll=0.5 stick yields ACTUAL=185 / LEGACY=308 / QUICK=335 dps (all finite,
-  mutually distinct, full-stick ACTUAL=670). Zero-warning build.
+  mutually distinct, full-stick ACTUAL=670); [15] big snap fires, small/relative/
+  cooldown-suppressed cases verified, onSetback widens interval 10→40. Zero-warning build.
 
 ## [Unreleased] — quadcopter feel + firework-beat & high-speed root causes
 

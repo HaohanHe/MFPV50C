@@ -7,6 +7,7 @@
     "CameraMixin",
     "LivingEntityMixin",
     "LocalPlayerMixin",
+    "ClientPacketListenerMixin",
     "GuiMixin"
   ],
   "injectors": {

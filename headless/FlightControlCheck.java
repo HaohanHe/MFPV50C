@@ -527,6 +527,32 @@ public class FlightControlCheck {
       check("full-stick ACTUAL reaches ~max (670)", Math.abs(spFull - 670f) < 30, "full="+String.format("%.1f", spFull));
     }
 
+    // ---------- 15. Remote setback detection: big snap fires, small/relative/cooldown don't ----------
+    System.out.println("\n[15] Remote rubber-band setback detector + onSetback backoff");
+    {
+      dev.fpv.flight.SetbackDetector det = dev.fpv.flight.SetbackDetector.INSTANCE;
+      check("big absolute snap (>2 blocks) is a setback",
+        det.isSetback(5.0, true, 2.0f, Long.MAX_VALUE, 0L), "dist=5");
+      check("small absolute correction (<2 blocks) is NOT",
+        !det.isSetback(0.5, true, 2.0f, Long.MAX_VALUE, 0L), "dist=0.5");
+      check("relative-axis delta never counts",
+        !det.isSetback(5.0, false, 2.0f, Long.MAX_VALUE, 0L), "relatives");
+      check("cooldown not elapsed -> suppressed",
+        !det.isSetback(5.0, true, 2.0f, 100L, 800L), "cd=100/800");
+      check("cooldown elapsed -> fires",
+        det.isSetback(5.0, true, 2.0f, 900L, 800L), "cd=900/800");
+
+      ServerCompatLogic logic = new ServerCompatLogic(remoteCfg());
+      int intervalBefore = logic.effectiveFireworkInterval();
+      logic.onSetback();
+      int intervalAfter = logic.effectiveFireworkInterval();
+      double penalty = logic.currentPenalty();
+      System.out.printf("    interval before=%d after=%d penalty=%.2f%n", intervalBefore, intervalAfter, penalty);
+      check("onSetback raises penalty to 1.0", penalty >= 0.99, "p="+String.format("%.2f", penalty));
+      check("interval widened after setback (anti-kick)", intervalAfter > intervalBefore,
+        intervalBefore + "->" + intervalAfter);
+    }
+
     System.out.println("\n========================================");
     System.out.println(failures == 0 ? "ALL TESTS PASS" : ("FAILURES: " + failures));
     System.exit(failures == 0 ? 0 : 1);

@@ -57,6 +57,28 @@ object FpvClient : ClientModInitializer {
     @JvmField
     var armed = false
 
+    // ---- Remote setback (rubber-band) event bus ----
+    // Written by the position-packet mixin (no MC types on the flight side),
+    // consumed by LocalPlayerMixin each tick which owns the persistent logic.
+    private var setbackDistance = 0.0
+    private var setbackNanos = 0L
+
+    /** Called by the client-packet mixin when a rubber-band snap is detected. */
+    fun notifyServerSetback(distanceBlocks: Double) {
+        setbackDistance = distanceBlocks
+        setbackNanos = System.nanoTime()
+    }
+
+    /** Consume a pending setback event (debounced by cooldownMs); distance or null. */
+    fun consumeServerSetback(cooldownMs: Long): Double? {
+        if (setbackNanos == 0L) return null
+        val elapsedMs = (System.nanoTime() - setbackNanos) / 1_000_000.0
+        if (elapsedMs < cooldownMs) return null
+        val d = setbackDistance
+        setbackNanos = 0L
+        return d
+    }
+
     /**
      * Arming-check blocker codes for the current frame (Betaflight arming-disable
      * flags, client equivalent). Empty = arming allowed. The codes are only

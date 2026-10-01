@@ -71,6 +71,16 @@ class LocalPlayerMixin {
             val logic = fpvCompat!!
             logic.tick()
 
+            // Consume a rubber-band setback detected by the packet mixin: widen the
+            // firework interval and soften the turn (ServerCompatLogic.onSetback).
+            FpvClient.consumeServerSetback(sc.setbackCooldownMs)?.let { dist ->
+                if (sc.antiKick) {
+                    logic.onSetback()
+                    println("[FPV] setback reaction: snapped " +
+                        String.format("%.1f", dist) + " blocks; boost/turn backoff engaged")
+                }
+            }
+
             // nose = attitude * (0,0,-1); map to vanilla look.
             val attitude = FpvClient.flight.attitude
             val nose = Vector3f(0f, 0f, -1f).rotate(attitude)
