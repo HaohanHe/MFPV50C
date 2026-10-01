@@ -1597,8 +1597,33 @@ public class FlightControlCheck {
       check("no NaN", !Float.isNaN(dB.y()), "");
     }
 
+    // ---------- 47. BeepScheduler: disarmed silent, throttled continuous alarms ----------
+    System.out.println("\n[47] beep scheduling (disarmed silent / throttled)");
+    {
+      var bs = dev.fpv.flight.BeepScheduler.INSTANCE;
+      var NONE = dev.fpv.flight.MotorTone.Beep.NONE; var RX_LOST = dev.fpv.flight.MotorTone.Beep.RX_LOST; var BAT_LOW = dev.fpv.flight.MotorTone.Beep.BAT_LOW;
+      // disarmed + rxFail: NONE even at any time.
+      check("disarmed rxFail -> NONE", bs.continuousAlarm(10000L, false, true, 3.9f, 0L)==NONE, "");
+      check("disarmed BAT_LOW -> NONE", bs.continuousAlarm(10000L, false, false, 3.4f, 0L)==NONE, "");
+      // armed + rxFail: first tick fires, within interval NONE, after interval fires again.
+      int fires = 0; long t = 0L; long last = -100000L;
+      for (int i=0;i<200;i++){ t += 16L; var ev = bs.continuousAlarm(t, true, true, 3.9f, last);
+        if (ev==RX_LOST){ fires++; last = t; } }
+      System.out.printf("    200 ticks (3.2s) RX_LOST fires=%d (expected ~3)%n", fires);
+      check("RX_LOST throttled to bounded count (not per-frame)", fires>=2 && fires<=5, ""+fires);
+      // recovered -> NONE immediately.
+      check("rxFail recovered -> NONE", bs.continuousAlarm(t, true, false, 3.9f, last)==NONE, "");
+      // BAT_LOW throttled.
+      int low = 0; last = -100000L;
+      for (int i=0;i<300;i++){ t += 16L; var ev = bs.continuousAlarm(t, true, false, 3.5f, last);
+        if (ev==BAT_LOW){ low++; last = t; } }
+      System.out.printf("    BAT_LOW over 4.8s fires=%d%n", low);
+      check("BAT_LOW throttled bounded", low>=2 && low<=6, ""+low);
+    }
+
     System.out.println("\n========================================");
     System.out.println(failures == 0 ? "ALL TESTS PASS" : ("FAILURES: " + failures));
     System.exit(failures == 0 ? 0 : 1);
   }
 }
+

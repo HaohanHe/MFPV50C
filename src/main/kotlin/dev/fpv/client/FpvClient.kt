@@ -48,6 +48,11 @@ object FpvClient : ClientModInitializer {
     @JvmField
     var throttle = 0f
 
+    /** Looping motor whine; created once, started only when armed + spinning. */
+    private var whine: MotorWhineSound? = null
+    /** Registered motor-whine sound event (created once at init). */
+    var motorWhineEvent: net.minecraft.sounds.SoundEvent? = null
+
     /**
      * Arm state. The craft cannot engage while disarmed; disarming mid-flight
      * cuts the flight (returns to the vanilla glide/fall). When an arm switch
@@ -170,12 +175,14 @@ object FpvClient : ClientModInitializer {
         RaceManager.registerWorldRendering()
 
         // Module 3: register the looping motor-whine sound event.
+        val whineEvent = net.minecraft.sounds.SoundEvent.createVariableRangeEvent(
+            net.minecraft.resources.Identifier.fromNamespaceAndPath("fpv", "motor_whine")
+        )
+        motorWhineEvent = whineEvent
         net.minecraft.core.Registry.register(
             net.minecraft.core.registries.BuiltInRegistries.SOUND_EVENT,
             net.minecraft.resources.Identifier.fromNamespaceAndPath("fpv", "motor_whine"),
-            net.minecraft.sounds.SoundEvent.createVariableRangeEvent(
-                net.minecraft.resources.Identifier.fromNamespaceAndPath("fpv", "motor_whine")
-            ),
+            whineEvent,
         )
 
         toggleKey = KeyBindingHelper.registerKeyBinding(
@@ -422,6 +429,31 @@ object FpvClient : ClientModInitializer {
             FpvBeeper.update(mc, cellV, armed, link.state == LinkState.FAILSAFE,
                 config.immersion?.audioEnabled ?: true)
             FpvBeeper.pump()
+        }
+
+        // Module 3 continuous motor whine: only armed + spinning. Speed = actual mixer outputs
+        // (idle floor included), NOT the throttle command. disarmed / motors stopped = silent.
+        run {
+            val audioOn = config.immersion?.audioEnabled ?: true
+            var speed = 0f
+            if (armed && audioOn && flight.ready) {
+                val m = flight.readMotorNorm()
+                var mx = 0f
+                for (v in m) mx = kotlin.math.max(mx, kotlin.math.abs(v))
+                speed = mx
+            }
+            val inst = whine
+            if (speed > Defaults.WHINE_MIN_SPEED) {
+                if (inst == null && motorWhineEvent != null) {
+                    val w = MotorWhineSound(motorWhineEvent!!, Defaults.WHINE_BASE_PITCH, Defaults.WHINE_FULL_PITCH)
+                    mc.soundManager.play(w)
+                    whine = w
+                }
+                whine?.updateSpeed(speed)
+            } else if (inst != null) {
+                inst.updateSpeed(0f)   // triggers stop() in tick()
+                whine = null
+            }
         }
 
         if (flight.ready) flightTimeSec += dt

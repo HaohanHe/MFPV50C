@@ -112,6 +112,12 @@ object Defaults {
     /** Motor whine pitch at idle / full throttle (report: 0.8 / ~2.5x). */
     const val WHINE_BASE_PITCH = 0.8f
     const val WHINE_FULL_PITCH = 2.5f
+    /** Motor whine only plays when armed and normalized motor speed exceeds this. */
+    const val WHINE_MIN_SPEED = 0.05f
+    /** Min repeat interval for continuous alarms (throttle; never per-frame). */
+    const val RX_LOST_BEEP_INTERVAL_MS = 1000L
+    const val BAT_LOW_BEEP_INTERVAL_MS = 1500L
+    const val BAT_CRIT_BEEP_INTERVAL_MS = 800L
 
     // ---- Setpoint (RC) smoothing ----
     /** Published setpoint-smoother floor; engineering starting cutoff (Hz). */
