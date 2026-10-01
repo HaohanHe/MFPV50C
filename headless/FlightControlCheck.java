@@ -588,6 +588,39 @@ public class FlightControlCheck {
       check("unbound channel never participates", rUb.getDesiredMode() == null, ""+rUb.getDesiredMode());
     }
 
+    // ---------- 17. Camera tilt ramp on arm: monotonic, bounded steps, full tilt; disarm back ----------
+    System.out.println("\n[17] Camera-tilt ramp (no unlock snap)");
+    {
+      dev.fpv.flight.CameraTiltRamp ramp = new dev.fpv.flight.CameraTiltRamp(0.4f);
+      float dt = 0.016f;
+      // arm: target 25 deg
+      double v0 = ramp.update(25f, dt);
+      boolean monotonic = true; boolean bounded = true;
+      double prev = v0;
+      for (int i = 0; i < 60; i++) { // ~1s, well beyond 0.4s ramp
+        double tt = ramp.update(25f, dt);
+        if (tt < prev - 1e-4) monotonic = false;
+        if (Math.abs(tt - prev) > 25f * dt / 0.4f + 1e-4) bounded = false;
+        prev = tt;
+      }
+      double armed = prev;
+      System.out.printf("    after arm: v0=%.2f final=%.2f deg (ramp=0.4s, dt=%.3f)%n", v0, armed, dt);
+      check("tilt starts small (no 25 deg snap on arm)", v0 < 2.0, "v0="+String.format("%.2f", v0));
+      check("tilt ramps monotonically up on arm", monotonic, "");
+      check("per-frame increment bounded by ramp rate", bounded, "");
+      check("tilt reaches full 25 deg", Math.abs(armed - 25f) < 0.5, "final="+String.format("%.2f", armed));
+      // disarm: target 0
+      boolean monoDown = true; double pprev = armed;
+      for (int i = 0; i < 60; i++) {
+        double tt = ramp.update(0f, dt);
+        if (tt > pprev + 1e-4) monoDown = false;
+        pprev = tt;
+      }
+      System.out.printf("    after disarm: final=%.3f deg%n", pprev);
+      check("tilt ramps back to 0 on disarm", pprev < 0.5, "final="+String.format("%.3f", pprev));
+      check("disarm ramp monotonic down", monoDown, "");
+    }
+
     System.out.println("\n========================================");
     System.out.println(failures == 0 ? "ALL TESTS PASS" : ("FAILURES: " + failures));
     System.exit(failures == 0 ? 0 : 1);

@@ -8,6 +8,7 @@
 package dev.fpv.client.mixin
 
 import dev.fpv.client.FpvClient
+import dev.fpv.flight.CameraTiltRamp
 import dev.fpv.replay.ReplayManager
 import net.minecraft.client.Camera
 import net.minecraft.world.entity.Entity
@@ -17,6 +18,7 @@ import org.joml.Quaternionf
 import org.spongepowered.asm.mixin.Final
 import org.spongepowered.asm.mixin.Mixin
 import org.spongepowered.asm.mixin.Shadow
+import org.spongepowered.asm.mixin.Unique
 import org.spongepowered.asm.mixin.injection.At
 import org.spongepowered.asm.mixin.injection.Inject
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo
@@ -30,6 +32,10 @@ class CameraMixin {
 
     @Shadow
     private var position: Vec3? = null
+
+    /** Smooth arm/disarm camera-tilt ramp (no 25 deg snap on unlock). */
+    @Unique private val tiltRamp = CameraTiltRamp()
+    @Unique private var lastSetupNanos = 0L
 
     @Inject(method = ["setup"], at = [At("TAIL")])
     private fun fpvSetupTail(
@@ -53,8 +59,15 @@ class CameraMixin {
         if (FpvClient.flight.ready) {
             // Render the drone attitude, then apply the user FPV camera tilt as a
             // permanent nose-down pitch offset (positive tilt = camera looks up).
+            // The tilt ramps in smoothly on arm (no unlock jerk) and back to 0 on
+            // disarm.
             val base = FpvClient.flight.attitude
-            val tiltDeg = FpvClient.config.activeAirframe().cameraTiltDeg
+            val targetTilt = FpvClient.config.activeAirframe().cameraTiltDeg
+            val now = System.nanoTime()
+            val dtSec = if (lastSetupNanos == 0L) 0.016f
+                         else ((now - lastSetupNanos) / 1_000_000_000.0).toFloat().coerceIn(0.001f, 0.1f)
+            lastSetupNanos = now
+            val tiltDeg = tiltRamp.update(targetTilt, dtSec)
             val q = Quaternionf(base)
             if (tiltDeg != 0f) {
                 // Rotate about the body X (pitch) axis by -tilt so the camera
@@ -63,6 +76,10 @@ class CameraMixin {
                     (-tiltDeg * Math.PI / 180.0).toFloat()))
             }
             rotation?.set(q)
+        } else {
+            // Disarmed/idle: ramp the tilt back to zero and reset the clock.
+            lastSetupNanos = 0L
+            tiltRamp.update(0f, 0.016f)
         }
     }
 }

@@ -47,6 +47,9 @@ object Defaults {
     const val SETBACK_THRESHOLD_BLOCKS = 2.0f
     const val SETBACK_COOLDOWN_MS = 800L
 
+    // ---- FPV camera-tilt ramp: seconds to ramp from 0 to full tilt on arm ----
+    const val CAMERA_TILT_RAMP_SEC = 0.4f
+
     // ---- Legacy (Betaflight rcRate/superRate) published configurator defaults ----
     const val LEGACY_RC_RATE = 2.0f
     const val LEGACY_SUPER_RATE = 0.7f

@@ -33,6 +33,11 @@ revision. No formal GitHub Release is published until real-hardware acceptance.
   ANGLE/HORIZON/HEADFREE). Default device profiles still leave S1/S2 unbound —
   nothing is guessed; the pilot binds them once with the wizard. AuxAnalyzer itself
   remains unused (auto-grouping of ghost buttons was not needed).
+- **Unlock camera-tilt smoothing** (`flight/CameraTiltRamp.kt`): the FPV camera tilt
+  (default 25 deg) no longer snaps in on arm — it ramps in at a bounded per-frame
+  rate over `CAMERA_TILT_RAMP_SEC` (default 0.4s) and ramps back to 0 on disarm,
+  eliminating the reported "unlock camera jerk". Measured per-frame delta is bounded
+  so a lag spike can never produce a visible jump.
 
 ### Fixed
 - `AxisRates` gained legacy-only `rcRate`/`superRate` fields (defaults 2.0/0.7);
@@ -46,7 +51,8 @@ revision. No formal GitHub Release is published until real-hardware acceptance.
   mutually distinct, full-stick ACTUAL=670); [15] big snap fires, small/relative/
   cooldown-suppressed cases verified, onSetback widens interval 10→40; [16] a
   continuous S1 aux at 0.8 engages ANGLE, at 0.2 releases it, an unbound channel
-  never participates. Zero-warning build.
+  never participates. [17] tilt ramps in monotonically (first frame only 1 deg, not
+  25), reaches 25 deg at 0.4s, ramps back to 0 on disarm. Zero-warning build.
 
 ## [Unreleased] — quadcopter feel + firework-beat & high-speed root causes
 
