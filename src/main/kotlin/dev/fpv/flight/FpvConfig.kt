@@ -510,6 +510,15 @@ class FpvConfig {
     /** Battery to use: the active airframe's pack if it defines one, else the shared pack. */
     fun activeBattery(): BatteryConfig = activeAirframe().battery ?: (battery ?: BatteryConfig())
 
+    /**
+     * Full-stick yaw rate (deg/s) the REAL plant physically reaches at hover on
+     * the active airframe. Exposed so the config GUI can annotate that the
+     * nominal yaw.rate max may exceed what the mixer/reaction-torque can deliver;
+     * not a hard limit.
+     */
+    fun yawPhysicalMaxDps(): Float =
+        activeAirframe().yawPhysicalMaxDps(activeAirframe().effectiveHoverThrottle())
+
     /** Cycle to the next profile in the list (wraps). */
     fun cycleAirframe() {
         val i = airframes.indexOfFirst { it.name == activeAirframeName }

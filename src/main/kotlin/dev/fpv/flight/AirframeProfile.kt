@@ -319,6 +319,32 @@ class AirframeProfile {
     fun effectiveHoverThrottle(): Float =
         if (hoverThrottle > 0f) hoverThrottle.coerceIn(0f, 1f) else autoHoverThrottle()
 
+    /**
+     * Steady-state FULL-STICK yaw rate (deg/s) the rigid-body plant can actually
+     * reach, data-driven from this airframe. It is NOT a hard speed limit: it is
+     * the physical ceiling beyond which extra yaw stick authority cannot spin
+     * faster.
+     *
+     * Derivation (RealDynamics step, at saturated PID differential d=+/-1):
+     * the two motors on the +yaw mixer column command uHi = min(thr+yawAuthority, 1),
+     * the two on the -yaw column command uLo = max(thr-yawAuthority, minThrottle).
+     * The net reaction torque is |tauYaw| = 2*(uHi-uLo)*reactionTorquePerMotorNm*derate.
+     * At steady state this balances viscous yaw damping rotDampYY*omega, so
+     * omega = tauYaw / rotDampYY (rad/s). Roll/pitch moments integrate out here;
+     * at pure steady yaw the gyroscopic coupling terms vanish.
+     */
+    fun yawPhysicalMaxDps(throttle: Float, derate: Float = 1f): Float {
+        val yawAuth = yawAuthority.coerceIn(0f, 0.9f)
+        val thr = throttle.coerceIn(0f, 1f)
+        val der = derate.coerceIn(0.2f, 1f)
+        val uHi = (thr + yawAuth).coerceAtMost(1f)
+        val uLo = (thr - yawAuth).coerceAtLeast(minThrottle)
+        val netMotorFraction = (uHi - uLo).coerceAtLeast(0f)
+        val tauYaw = 2f * netMotorFraction * reactionTorquePerMotorNm * der
+        val omegaRadS = tauYaw / rotDampYY.coerceAtLeast(1e-6f)
+        return (omegaRadS * 180.0 / Math.PI).toFloat()
+    }
+
     /** Rotational first-order time constant, seconds, for the given axis. */
     fun tauSec(axis: BodyAxis): Float = when (axis) {
         BodyAxis.PITCH -> inertiaXX / (angularDragXX * airGrip).coerceAtLeast(1e-6f)

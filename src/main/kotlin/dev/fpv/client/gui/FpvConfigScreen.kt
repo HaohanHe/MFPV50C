@@ -771,6 +771,14 @@ class FpvConfigScreen(private val parent: Screen?) :
             af.physicsModelVersion,
         )
         g.drawCenteredString(font, line, width / 2, height - 44, 0xFF55FF55.toInt())
+        // I-9: annotate the REAL yaw ceiling vs the nominal rate max so a pilot
+        // setting yaw.rate beyond the mixer/reaction-torque limit sees why.
+        val yawPhys = cfg.yawPhysicalMaxDps()
+        g.drawCenteredString(
+            font,
+            Component.literal("YAW full-stick physical ~%.0f dps (nominal max %.0f dps)".format(yawPhys, cfg.yaw.max)),
+            width / 2, height - 32, 0xFFFFFF55.toInt(),
+        )
     }
 
     private fun addToggle(x: Int, y: Int, w: Int, key: String,
