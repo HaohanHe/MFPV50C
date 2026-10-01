@@ -8,6 +8,20 @@ revision. No formal GitHub Release is published until real-hardware acceptance.
 
 ## [Unreleased] — OSD refactor: data-driven element registry
 
+### Added (immersion runtime wiring: post-chain switch + event beeps)
+- **Post chain really wired** (javap-verified mojmap 1.21.11): `GameRendererMixin` uses
+  `@Shadow setPostEffect(Identifier)` / public `clearPostEffect()`; each frame enables
+  `Identifier("fpv","fpv_post")` (= `assets/fpv/shaders/post/fpv_post.json`, the ShaderManager
+  `shaders/post` prefix) when `config.immersion.opticsEnabled`, else clears. Real on/off switch.
+  Per-frame LQ-driven uniform animation needs the PostPass GpuBuffer path -> 需真机.
+- **One-shot beeps wired** (`client/FpvBeeper.kt`): vanilla `SimpleSoundInstance.forUI` +
+  NOTE_BLOCK sounds, called from onFrame with cellV/armed/rxFail. ARM double / DISARM single /
+  BAT_LOW / BAT_CRIT / RX_LOST (event choice = headless-tested MotorTone).
+- **Continuous motor whine asset**: synthesized `assets/fpv/sounds/motor_whine.ogg` +
+  `sounds.json` + registered `fpv:motor_whine` event + `client/MotorWhineSound.kt`
+  (AbstractTickableSoundInstance, pitch from |m|, fades out at idle).
+- headless still [1]-[38] PASS; clean build zero warnings.
+
 ### Added (immersion layer: optics / signal / audio logic + shader resources)
 - **`flight/ImmersionConfig`** (FpvConfig): data-driven optics (BarrelK1=-0.22, K2=0,
   vignette=0.35, CA=0.004), glitch (half-distance, noise; default off), audio (whine base/full

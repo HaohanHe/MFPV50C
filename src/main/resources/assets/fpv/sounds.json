@@ -1,0 +1,8 @@
+{
+  "fpv.motor_whine": {
+    "category": "AMBIENT",
+    "sounds": [
+      { "name": "fpv:motor_whine", "stream": false, "volume": 0.5, "attenuation_distance": 0 }
+    ]
+  }
+}

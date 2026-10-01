@@ -169,6 +169,15 @@ object FpvClient : ClientModInitializer {
         // Racing core: hook world rendering (gates + ghost) once.
         RaceManager.registerWorldRendering()
 
+        // Module 3: register the looping motor-whine sound event.
+        net.minecraft.core.Registry.register(
+            net.minecraft.core.registries.BuiltInRegistries.SOUND_EVENT,
+            net.minecraft.resources.Identifier.fromNamespaceAndPath("fpv", "motor_whine"),
+            net.minecraft.sounds.SoundEvent.createVariableRangeEvent(
+                net.minecraft.resources.Identifier.fromNamespaceAndPath("fpv", "motor_whine")
+            ),
+        )
+
         toggleKey = KeyBindingHelper.registerKeyBinding(
             KeyMapping(
                 "key.fpv.toggle",
@@ -272,6 +281,12 @@ object FpvClient : ClientModInitializer {
      * while flying with no GUI open. Called from GameRendererMixin at the
      * renderLevel HEAD.
      */
+    /** Should the FPV post-process chain (optics) be active this frame? */
+    fun immersionPostActive(): Boolean {
+        val im = config.immersion ?: return false
+        return config.enabled && im.opticsEnabled
+    }
+
     fun onFrame(mc: Minecraft) {
         val now = System.nanoTime()
         val dt = if (lastNanos == 0L) {
@@ -378,6 +393,15 @@ object FpvClient : ClientModInitializer {
             val nomCells = af.effectiveCellCount(config.activeBattery().cellCount)
             val nominalV = nomCells * Defaults.VBAT_FULL_CELL
             flight.batteryDerate = if (nominalV > 0.1f) battery.vbat / nominalV else 1f
+        }
+
+        // Module 3 one-shot event beeps (ARM/DISARM/BAT_LOW/CRIT/RX_LOST).
+        run {
+            val cells = config.activeBattery().cellCount.coerceAtLeast(1)
+            val cellV = battery.vbat / cells
+            FpvBeeper.update(mc, cellV, armed, link.state == LinkState.FAILSAFE,
+                config.immersion?.audioEnabled ?: true)
+            FpvBeeper.pump()
         }
 
         if (flight.ready) flightTimeSec += dt
