@@ -37,10 +37,22 @@ object TrackStore {
 
     fun save(doc: TrackDoc): Boolean = try {
         Files.createDirectories(dir())
-        Files.writeString(fileFor(doc.name), gson.toJson(doc))
+        saveTo(fileFor(doc.name), doc)
         true
     } catch (e: Exception) {
         false
+    }
+
+    /**
+     * Serialize [doc] and atomically write it to [path] (sibling temp file +
+     * atomic move) via the shared [dev.fpv.flight.AtomicFiles]. A reader can
+     * never observe a half-written track even if the process dies mid-save, and
+     * a failed write leaves the previous file intact rather than truncating it.
+     * Split off from [save] so it is testable headless without FabricLoader.
+     */
+    @JvmStatic
+    fun saveTo(path: Path, doc: TrackDoc) {
+        dev.fpv.flight.AtomicFiles.writeText(path, gson.toJson(doc))
     }
 
     fun load(name: String): TrackDoc? = try {
