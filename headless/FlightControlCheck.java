@@ -1388,6 +1388,36 @@ public class FlightControlCheck {
       check("beep RX_LOST wins", tone.event(3.9f,true,false,true)==dev.fpv.flight.MotorTone.Beep.RX_LOST, "");
     }
 
+    // ---------- 39. Discrete signal bands: tier + hysteresis + dwell ----------
+    System.out.println("\n[39] signal band selection (LQ->chain, hysteresis, dwell)");
+    {
+      var sb = dev.fpv.flight.SignalBands.INSTANCE;
+      var CLEAN = dev.fpv.flight.SignalBands.Band.CLEAN;
+      var MILD = dev.fpv.flight.SignalBands.Band.MILD;
+      var HEAVY = dev.fpv.flight.SignalBands.Band.HEAVY;
+      var FROZEN = dev.fpv.flight.SignalBands.Band.FROZEN;
+      // CLEAN band -> null chain.
+      check("clean badness -> CLEAN, null chain", sb.decide(0.0, CLEAN, 999)==CLEAN && sb.chainId(CLEAN)==null, "");
+      // escalation by badness.
+      check("badness 0.15 -> MILD", sb.decide(0.15, CLEAN, 999)==MILD, "");
+      check("badness 0.30 -> HEAVY", sb.decide(0.30, MILD, 999)==HEAVY, "");
+      check("badness 0.50 -> FROZEN", sb.decide(0.50, HEAVY, 999)==FROZEN, "");
+      check("chain ids", "fpv_sig_mild".equals(sb.chainId(MILD)) && "fpv_sig_heavy".equals(sb.chainId(HEAVY)) && "fpv_sig_frozen".equals(sb.chainId(FROZEN)), "");
+      // hysteresis: in MILD, badness 0.08 is between DN_MILD(0.06) and UP_MILD(0.10) deadband -> stays MILD.
+      check("hysteresis deadband holds MILD at 0.08", sb.decide(0.08, MILD, 999)==MILD, "");
+      // but below DN_MILD(0.06) it drops back to CLEAN.
+      check("below DN_MILD -> CLEAN", sb.decide(0.04, MILD, 999)==CLEAN, "");
+      // dwell: at HEAVY, badness jumps above UP_FROZEN but ticksInBand < MIN -> stays HEAVY.
+      check("dwell blocks switching within MIN ticks", sb.decide(0.9, HEAVY, 5)==HEAVY, "");
+      check("dwell expires -> FROZEN", sb.decide(0.9, HEAVY, 11)==FROZEN, "");
+      // selectChain returns (band, chainId); CLEAN -> null.
+      var sel = sb.selectChain(0.0, CLEAN, 999);
+      check("selectChain CLEAN -> null chain", sel.getSecond()==null, String.valueOf(sel.getSecond()));
+      var sel2 = sb.selectChain(0.3, CLEAN, 999);
+      System.out.printf("    selectChain bad=0.3 -> %s / %s%n", sel2.getFirst(), sel2.getSecond());
+      check("no NaN in thresholds", !Double.isNaN(sb.UP_MILD) && !Double.isNaN(sb.UP_FROZEN), "");
+    }
+
     System.out.println("\n========================================");
     System.out.println(failures == 0 ? "ALL TESTS PASS" : ("FAILURES: " + failures));
     System.exit(failures == 0 ? 0 : 1);

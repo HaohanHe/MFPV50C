@@ -281,10 +281,30 @@ object FpvClient : ClientModInitializer {
      * while flying with no GUI open. Called from GameRendererMixin at the
      * renderLevel HEAD.
      */
-    /** Should the FPV post-process chain (optics) be active this frame? */
+    /** Should ANY FPV post-process chain be active this frame (optics or signal glitch)? */
     fun immersionPostActive(): Boolean {
         val im = config.immersion ?: return false
-        return config.enabled && im.opticsEnabled
+        return config.enabled && (im.opticsEnabled || im.glitchEnabled)
+    }
+
+    // ---- discrete signal-band selector state (hysteresis + dwell) ----
+    private var sigBand = dev.fpv.flight.SignalBands.Band.CLEAN
+    private var sigBandTicks = 0
+
+    /**
+     * Which post-chain to load this frame. Returns null when CLEAN (caller clears).
+     * Optics chain wins if optics enabled; otherwise the LQ-driven signal band is used.
+     */
+    fun activePostChain(): String? {
+        val im = config.immersion ?: return null
+        if (!config.enabled) return null
+        if (im.opticsEnabled) return "fpv_post"
+        if (!im.glitchEnabled) return null
+        val bad = dev.fpv.flight.SignalModel.badness(link.lq / 100.0)
+        sigBandTicks++
+        val (b, chain) = dev.fpv.flight.SignalBands.selectChain(bad, sigBand, sigBandTicks)
+        if (b != sigBand) { sigBand = b; sigBandTicks = 0 }
+        return chain
     }
 
     fun onFrame(mc: Minecraft) {

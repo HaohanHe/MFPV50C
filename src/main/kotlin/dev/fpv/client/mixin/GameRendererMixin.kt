@@ -26,8 +26,7 @@ abstract class GameRendererMixin {
     @Shadow protected abstract fun setPostEffect(id: Identifier)
     @Shadow public abstract fun clearPostEffect()
 
-    @Unique private val fpvPostId: Identifier = Identifier.fromNamespaceAndPath("fpv", "fpv_post")
-    @Unique private var fpvApplied: Boolean = false
+    @Unique private var fpvAppliedChain: String? = null
 
     @Inject(method = ["renderLevel"], at = [At("HEAD")])
     private fun fpvRenderLevelHead(delta: DeltaTracker, ci: CallbackInfo) {
@@ -42,12 +41,17 @@ abstract class GameRendererMixin {
     @Inject(method = ["render"], at = [At("HEAD")])
     private fun fpvPostChain(delta: DeltaTracker, tick: Boolean, ci: CallbackInfo) {
         val want = FpvClient.immersionPostActive()
-        if (want && !fpvApplied) {
-            setPostEffect(fpvPostId)
-            fpvApplied = true
-        } else if (!want && fpvApplied) {
+        val chainName = FpvClient.activePostChain() // null = CLEAN -> clear
+        if (want && chainName != null) {
+            val id = Identifier.fromNamespaceAndPath("fpv", chainName)
+            if (fpvAppliedChain != chainName) {
+                clearPostEffect()
+                setPostEffect(id)
+                fpvAppliedChain = chainName
+            }
+        } else if (fpvAppliedChain != null) {
             clearPostEffect()
-            fpvApplied = false
+            fpvAppliedChain = null
         }
     }
 }

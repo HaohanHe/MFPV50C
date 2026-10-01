@@ -8,6 +8,17 @@ revision. No formal GitHub Release is published until real-hardware acceptance.
 
 ## [Unreleased] — OSD refactor: data-driven element registry
 
+### Added (signal bands: discrete LQ-driven chain switching)
+- **`flight/SignalBands.kt`**: CLEAN/MILD/HEAVY/FROZEN bands from badness (=1-LQ), with
+  hysteresis deadband (UP_MILD 0.10 / DN_MILD 0.06, UP_HEAVY 0.25 / DN_HEAVY 0.18,
+  UP_FROZEN 0.40 / DN_FROZEN 0.30) + 10-tick min dwell, so the chain never flickers near a
+  threshold. CLEAN -> null (clearPostEffect); else a baked chain id.
+- Baked per-chain JSONs: `assets/fpv/shaders/post/fpv_sig_{mild,heavy,frozen}.json` with
+  SignalStrength baked (0.85 / 0.65 / 0.50) and mild optics.
+- `FpvClient.activePostChain()` runs the selector each frame; `GameRendererMixin` switches the
+  setPostEffect Identifier (clears old before enabling new). Continuous LQ interpolation = 需真机.
+- headless [39]: tier per region, hysteresis deadband, dwell block, CLEAN->null.
+
 ### Added (immersion runtime wiring: post-chain switch + event beeps)
 - **Post chain really wired** (javap-verified mojmap 1.21.11): `GameRendererMixin` uses
   `@Shadow setPostEffect(Identifier)` / public `clearPostEffect()`; each frame enables
