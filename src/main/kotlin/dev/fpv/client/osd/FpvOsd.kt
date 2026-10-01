@@ -1,11 +1,9 @@
 /*
  * FPV Craft - MIT
- * FPV OSD. Element positions/enabled flags come from the PERSISTED
- * [dev.fpv.flight.FpvConfig.osdElements] list (edited by OsdEditorScreen);
- * only the crosshair, artificial horizon and horizon sidebars are center-anchored.
- * Adds a virtual battery readout, virtual link quality (explicitly marked as
- * simulated), flight timer and a central transient warning (low battery / RX
- * loss / failsafe) on top of the existing speed / throttle / mode / horizon.
+ * FPV OSD. Draws by walking the persisted layout and dispatching on each
+ * element's registry renderer type (see dev.fpv.flight.OsdElements). Text elements
+ * are formatted by the pure, headless-testable OsdFormatter; positions / enabled /
+ * unit come from the persisted layout data. Adding an element is a registry entry.
  */
 package dev.fpv.client.osd
 
@@ -13,6 +11,13 @@ import dev.fpv.client.FpvClient
 import dev.fpv.flight.BatteryStage
 import dev.fpv.flight.Defaults
 import dev.fpv.flight.LinkState
+import dev.fpv.flight.OsdColor
+import dev.fpv.flight.OsdElementSpec
+import dev.fpv.flight.OsdElements
+import dev.fpv.flight.OsdFormatter
+import dev.fpv.flight.OsdRenderer
+import dev.fpv.flight.OsdTelemetry
+import dev.fpv.flight.OsdUnit
 import net.minecraft.client.Minecraft
 import net.minecraft.client.gui.GuiGraphics
 import org.joml.Quaternionf
@@ -30,6 +35,14 @@ object FpvOsd {
     private const val RED_FILL = 0xFFFF5555.toInt()
     private const val CYAN = 0xFF55FFFF.toInt()
     private const val GRAY = 0xFFAAAAAA.toInt()
+
+    private fun OsdColor.argb(): Int = when (this) {
+        OsdColor.GREEN -> GREEN
+        OsdColor.YELLOW -> YELLOW
+        OsdColor.RED -> RED
+        OsdColor.CYAN -> CYAN
+        OsdColor.GRAY -> GRAY
+    }
 
     fun draw(ctx: GuiGraphics) {
         val mc = Minecraft.getInstance()
@@ -52,7 +65,7 @@ object FpvOsd {
             val mark = if (blink) "\u25CF" else "\u25CB"
             ctx.drawString(
                 font,
-                "$mark REC  T+${formatSec(f.recordedSec)}  n=${f.sampleCount}",                4, sh - 12, 0xFFFF3333.toInt(), true,
+                "$mark REC  T+${formatSec(f.recordedSec)}  n=${f.sampleCount}", 4, sh - 12, 0xFFFF3333.toInt(), true,
             )
         }
         if (dev.fpv.replay.ReplayManager.active) {
@@ -65,9 +78,7 @@ object FpvOsd {
             )
         }
 
-        // Guidance while the player is trying to fly but cannot yet. List ALL
-        // arming-check blockers (Betaflight-style) rather than a single message,
-        // so the pilot is never silently refused an unlock without a reason.
+        // Guidance while the player is trying to fly but cannot yet.
         if (p.isFallFlying && !flight.ready) {
             val codes = FpvClient.armingBlockers
             val texts = FpvClient.armingBlockerText()
@@ -88,117 +99,56 @@ object FpvOsd {
 
         if (!flight.ready) return
 
-        // ---- Top-left cluster (positions from the persisted layout) ----
-        if (el(OsdLayout.SPEED)?.enabled == true) {
-            val e = el(OsdLayout.SPEED)!!
-            val kmh = p.deltaMovement.length() * 20.0 * 3.6
-            ctx.drawString(font, String.format("%.0f km/h", kmh), e.x, e.y, GREEN, true)
-        }
+        // ---- Build the frozen telemetry snapshot once ----
+        val b = FpvClient.battery
+        val iv = Quaternionf(flight.attitude).conjugate()
+        val bu = Vector3f(0f, 1f, 0f).rotate(iv)
+        val bfwd = Vector3f(0f, 0f, -1f).rotate(iv)
+        val tel = OsdTelemetry(
+            rollDeg = Math.toDegrees(atan2(-bu.x, bu.y).toDouble()).toFloat(),
+            pitchDeg = Math.toDegrees(asin((-bfwd.y).coerceIn(-1f, 1f).toDouble())).toFloat(),
+            targetPitchDeg = flight.targetPitchDeg,
+            targetRollDeg = flight.targetRollDeg,
+            groundSpeedMps = (p.deltaMovement.length() * 20.0).toFloat(),
+            vbat = b.vbat,
+            perCell = b.perCell(),
+            percent = b.percent(),
+            batteryStage = b.stage,
+            currentA = b.currentA,
+            mAhDrawn = b.mAhDrawn,
+            lq = FpvClient.link.lq.toFloat(),
+            throttle = FpvClient.throttle,
+            reversible3D = cfg.reversible3D,
+            headfree = cfg.headfreeEnabled,
+            mode = flight.currentMode.name,
+            armed = FpvClient.armed,
+            flightTimeSec = FpvClient.flightTimeSec,
+            linkFailsafe = FpvClient.link.state == LinkState.FAILSAFE,
+            linkHold = FpvClient.link.state == LinkState.HOLD,
+        )
+        val globalUnit = OsdUnit.parse(cfg.osdUnit)
 
-        if (el(OsdLayout.TARGET)?.enabled == true && flight.currentMode != dev.fpv.flight.FlightMode.ACRO) {
-            val e = el(OsdLayout.TARGET)!!
-            ctx.drawString(
-                font,
-                String.format("TGT P %+4.0f R %+4.0f", flight.targetPitchDeg, flight.targetRollDeg),
-                e.x, e.y, CYAN, true,
-            )
-        }
-
-        // Battery: total / per-cell / percent.
-        if (el(OsdLayout.BATTERY)?.enabled == true) {
-            val e = el(OsdLayout.BATTERY)!!
-            val b = FpvClient.battery
-            val col = when (b.stage) {
-                BatteryStage.CRITICAL -> RED
-                BatteryStage.WARNING -> YELLOW
-                else -> GREEN
+        // ---- Walk the persisted layout; dispatch on registry renderer type ----
+        for (e in cfg.osdElements) {
+            val spec = OsdElements.byId(e.id) ?: continue
+            if (!e.enabled) continue
+            when (spec.renderer) {
+                OsdRenderer.TEXT -> {
+                    // TARGET is only shown outside ACRO (self-leveling gives a target attitude).
+                    if (e.id == OsdElements.TARGET && flight.currentMode == dev.fpv.flight.FlightMode.ACRO) continue
+                    val unit = OsdFormatter.effectiveUnit(globalUnit, e.unitOverride)
+                    val txt = OsdFormatter.text(spec, tel, unit) ?: continue
+                    ctx.drawString(font, txt, e.x, e.y, textColor(spec, tel), true)
+                }
+                OsdRenderer.BANNER -> drawBanner(ctx, font, e, spec, tel, cx, cy)
+                OsdRenderer.ICON, OsdRenderer.HORIZON -> { /* center group below */ }
+                OsdRenderer.BAR, OsdRenderer.LADDER, OsdRenderer.GAUGE -> { /* reserved */ }
             }
-            ctx.drawString(
-                font,
-                String.format("BAT %.1fV (%.2f/c) %3.0f%%", b.vbat, b.perCell(), b.percent()),
-                e.x, e.y, col, true,
-            )
         }
 
-        // Virtual link quality - explicitly labelled as simulated.
-        if (el(OsdLayout.LQ)?.enabled == true) {
-            val e = el(OsdLayout.LQ)!!
-            val lq = FpvClient.link.lq
-            val col = if (lq < 50) RED else if (lq < 80) YELLOW else GREEN
-            ctx.drawString(font, "LQ(v) $lq%", e.x, e.y, col, true)
-        }
-
-        // Flight timer.
-        if (el(OsdLayout.FLIGHT_TIMER)?.enabled == true) {
-            val e = el(OsdLayout.FLIGHT_TIMER)!!
-            val s = FpvClient.flightTimeSec.toInt()
-            ctx.drawString(font, String.format("T+%d:%02d", s / 60, s % 60), e.x, e.y, GRAY, true)
-        }
-
-        // Throttle drawn at its persisted x/y (the editor fully controls it;
-        // no hidden bottom-anchor override anymore).
-        if (el(OsdLayout.THROTTLE)?.enabled == true) {
-            val e = el(OsdLayout.THROTTLE)!!
-            val thr = FpvClient.throttle
-            val thrStr = if (cfg.reversible3D) {
-                String.format("THR %+3d%%", (thr * 100).toInt())
-            } else {
-                String.format("THR %3d%%", (thr * 100).toInt())
-            }
-            ctx.drawString(font, thrStr, e.x, e.y, GREEN, true)
-        }
-
-        // Attitude degrees (pitch/roll; BF OSD_PITCH_ANGLE / OSD_ROLL_ANGLE).
-        if (el(OsdLayout.ATTITUDE)?.enabled == true) {
-            val e = el(OsdLayout.ATTITUDE)!!
-            val iv = Quaternionf(flight.attitude).conjugate()
-            val bu = Vector3f(0f, 1f, 0f).rotate(iv)
-            val bf = Vector3f(0f, 0f, -1f).rotate(iv)
-            val rDeg = Math.toDegrees(atan2(-bu.x, bu.y).toDouble())
-            val pDeg = Math.toDegrees(asin((-bf.y).coerceIn(-1f, 1f).toDouble()))
-            ctx.drawString(
-                font, String.format("P %+3.0f R %+3.0f", pDeg, rDeg), e.x, e.y, CYAN, true,
-            )
-        }
-
-        // Pack current (BF OSD_CURRENT).
-        if (el(OsdLayout.CURRENT)?.enabled == true) {
-            val e = el(OsdLayout.CURRENT)!!
-            ctx.drawString(
-                font, String.format("CUR %4.1fA", FpvClient.battery.currentA), e.x, e.y, GREEN, true,
-            )
-        }
-
-        // Consumed charge (BF OSD_MAH_DRAWN).
-        if (el(OsdLayout.MAH_DRAWN)?.enabled == true) {
-            val e = el(OsdLayout.MAH_DRAWN)!!
-            ctx.drawString(
-                font, String.format("MAH %4.0f", FpvClient.battery.mAhDrawn), e.x, e.y, GREEN, true,
-            )
-        }
-
-        // Mode banner (centered).
-        if (el(OsdLayout.MODE)?.enabled == true) {
-            val modeTag = buildString {
-                append(flight.currentMode.name)
-                if (cfg.reversible3D) append(" 3D")
-                if (cfg.headfreeEnabled) append(" HF")
-            }
-            // Persistent ARM/DISARM marker alongside the flight mode.
-            val armTag = if (FpvClient.armed) " ARM" else " DISARM"
-            ctx.drawCenteredString(
-                font, "FPV $modeTag$armTag", cx, 8,
-                if (FpvClient.armed) GREEN else RED,
-            )
-        }
-
-        // ---- Center-anchored: artificial horizon + pitch ladder + sidebars ----
-        // Roll angle and vertical group shift come from the SHARED OsdLayoutMath
-        // (same smoothed attitude the camera uses); the headless direction
-        // assertions pin the exact left/right and up/down screen directions there.
+        // ---- Center-anchored artificial horizon + sidebars ----
         val roll = dev.fpv.flight.OsdLayoutMath.rollRad(flight.attitude)
         val groupDy = dev.fpv.flight.OsdLayoutMath.groupDyPx(flight.attitude).toFloat()
-
         val showHorizon = el(OsdLayout.ARTIFICIAL_HORIZON)?.enabled == true
         val showSidebars = el(OsdLayout.HORIZON_SIDEBARS)?.enabled == true
         if (showHorizon || showSidebars) {
@@ -207,10 +157,7 @@ object FpvOsd {
             pose.translate(cx.toFloat(), cy.toFloat() + groupDy)
             pose.rotate(roll)
             if (showHorizon) {
-                // Level reference line.
                 ctx.fill(-30, -1, 30, 1, GREEN_FILL)
-                // Pitch ladder: ticks at fixed degree references (both signs),
-                // positioned relative to the shifted group; hidden past range.
                 for (absL in Defaults.OSD_PITCH_LADDER_DEG) {
                     for (signedL in intArrayOf(absL, -absL)) {
                         val ly = signedL * Defaults.OSD_PITCH_PX_PER_DEG
@@ -220,10 +167,7 @@ object FpvOsd {
                         val iy = ly.toInt()
                         val h = Defaults.OSD_PITCH_TICK_HALF
                         ctx.fill(-h, iy, h, iy + 1, GREEN_FILL)
-                        // Degree label to the right of the tick (rotates with roll).
-                        ctx.drawString(
-                            font, signedL.toString(), h + 2, iy - 3, GREEN, false,
-                        )
+                        ctx.drawString(font, signedL.toString(), h + 2, iy - 3, GREEN, false)
                     }
                 }
             }
@@ -237,19 +181,44 @@ object FpvOsd {
         if (el(OsdLayout.CROSSHAIR)?.enabled == true) {
             ctx.fill(cx - 1, cy - 1, cx + 1, cy + 1, YELLOW_FILL)
         }
+    }
 
-        // ---- Central transient warnings ----
-        if (el(OsdLayout.CENTER_WARNING)?.enabled == true) {
-            val b = FpvClient.battery
-            val link = FpvClient.link
-            when {
-                b.stage == BatteryStage.CRITICAL ->
+    /** Dynamic text colour (battery/lq thresholds override the registry default). */
+    private fun textColor(spec: OsdElementSpec, tel: OsdTelemetry): Int = when (spec.id) {
+        OsdElements.BATTERY -> when (tel.batteryStage) {
+            BatteryStage.CRITICAL -> RED
+            BatteryStage.WARNING -> YELLOW
+            else -> GREEN
+        }
+        OsdElements.LQ -> if (tel.lq < 50) RED else if (tel.lq < 80) YELLOW else GREEN
+        else -> spec.color.argb()
+    }
+
+    /** Centered banner elements: mode banner + transient center warning. */
+    private fun drawBanner(
+        ctx: GuiGraphics, font: net.minecraft.client.gui.Font, e: OsdElement,
+        spec: OsdElementSpec, tel: OsdTelemetry, cx: Int, cy: Int,
+    ) {
+        when (spec.id) {
+            OsdElements.MODE -> {
+                val modeTag = buildString {
+                    append(tel.mode)
+                    if (tel.reversible3D) append(" 3D")
+                    if (tel.headfree) append(" HF")
+                }
+                val armTag = if (tel.armed) " ARM" else " DISARM"
+                ctx.drawCenteredString(
+                    font, "FPV $modeTag$armTag", cx, 8, if (tel.armed) GREEN else RED,
+                )
+            }
+            OsdElements.CENTER_WARNING -> when {
+                tel.batteryStage == BatteryStage.CRITICAL ->
                     ctx.drawCenteredString(font, "LOW BATTERY", cx, cy + 14, RED_FILL)
-                b.stage == BatteryStage.WARNING ->
+                tel.batteryStage == BatteryStage.WARNING ->
                     ctx.drawCenteredString(font, "BATTERY WARNING", cx, cy + 14, YELLOW_FILL)
-                link.state == LinkState.FAILSAFE ->
+                tel.linkFailsafe ->
                     ctx.drawCenteredString(font, "FAILSAFE", cx, cy + 14, RED_FILL)
-                link.state == LinkState.HOLD ->
+                tel.linkHold ->
                     ctx.drawCenteredString(font, "RX LOST", cx, cy + 14, YELLOW_FILL)
             }
         }

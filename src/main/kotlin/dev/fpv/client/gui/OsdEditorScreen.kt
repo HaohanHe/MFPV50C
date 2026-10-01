@@ -99,6 +99,13 @@ class OsdEditorScreen(private val parent: Screen?) :
             }.bounds(width - 98, barY, 90, 20).build()
         )
 
+        addRenderableWidget(
+            Button.builder(Component.literal(if (cfg.osdUnit == "IMPERIAL") "Units: IMP" else "Units: MET")) {
+                cfg.osdUnit = if (cfg.osdUnit == "IMPERIAL") "METRIC" else "IMPERIAL"
+                rebuild()
+            }.bounds(width - 200, barY, 94, 20).build()
+        )
+
         // Add-popup: one button per movable element not currently in the layout.
         if (addMenuOpen) {
             var ay = barY - 6
@@ -185,23 +192,8 @@ class OsdEditorScreen(private val parent: Screen?) :
         else -> ""
     }
 
-    private fun labelOf(id: String): String = when (id) {
-        OsdLayout.CROSSHAIR -> "Crosshair"
-        OsdLayout.ARTIFICIAL_HORIZON -> "Horizon"
-        OsdLayout.HORIZON_SIDEBARS -> "Sidebars"
-        OsdLayout.SPEED -> "Speed"
-        OsdLayout.THROTTLE -> "Throttle"
-        OsdLayout.MODE -> "Mode"
-        OsdLayout.TARGET -> "Target"
-        OsdLayout.BATTERY -> "Battery"
-        OsdLayout.LQ -> "LinkQuality"
-        OsdLayout.FLIGHT_TIMER -> "Timer"
-        OsdLayout.ATTITUDE -> "Attitude"
-        OsdLayout.CURRENT -> "Current"
-        OsdLayout.MAH_DRAWN -> "M Ah"
-        OsdLayout.CENTER_WARNING -> "CenterWarn"
-        else -> id
-    }
+    private fun labelOf(id: String): String =
+        dev.fpv.flight.OsdElements.byId(id)?.labelEn ?: id
 
     private fun colorFor(id: String): Int = when (id) {
         OsdLayout.SPEED, OsdLayout.THROTTLE, OsdLayout.BATTERY, OsdLayout.LQ -> 0xFF55FF55.toInt()

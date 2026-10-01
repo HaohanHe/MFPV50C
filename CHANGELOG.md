@@ -6,6 +6,34 @@ Semantic Versioning; `main` is the development branch and `stable` points at the
 latest fully verified (zero-warning build + all verification scripts PASS)
 revision. No formal GitHub Release is published until real-hardware acceptance.
 
+## [Unreleased] — OSD refactor: data-driven element registry
+
+### Added
+- **OSD element registry** (`flight/OsdModel.kt`): `OsdElements.REGISTRY` declares every element by
+  id / zh+en label / renderer type (TEXT·BAR·LADDER·GAUGE·ICON·HORIZON·BANNER) / measured quantity /
+  default enable·position / colour. A frozen, Minecraft-free `OsdTelemetry` snapshot (attitude·rates·
+  speed·alt·vario·home·vbat/perCell/%·current·mAh·W·throttle·motor rpm·mixer out·LQ·mode·armed·timer)
+  feeds the pure `OsdFormatter`, so text rendering and unit math are headless-testable. Adding an
+  element is a one-line registry entry; the renderer main loop is untouched.
+- **Unit system** (`OsdUnit` METRIC/IMPERIAL; `FpvConfig.osdUnit`, `OsdElement.unitOverride`):
+  global metric/imperial toggle (plus per-element override) covering speed km/h↔mph, distance m↔ft.
+  Editor gains a "Units: MET/IMP" button. New `POWER` element (W = V·A) added disabled-by-default as
+  the power-channel data interface.
+- The data-interface slots for the pending batch of new elements are declared on `OsdTelemetry`
+  (GPS ground speed = body ground speed, coords = world X/Z, altitude = Y, vario = vertical speed,
+  home = unlock point, ESC rpm = motor model, per-motor % = mixer output, current/mAh/W = battery).
+
+### Changed
+- `FpvOsd` now walks the persisted layout and dispatches on each spec's renderer type; positions,
+  enable and units come from layout data (no hard-coded position `when`). Existing elements
+  (speed/target/battery/LQ/timer/throttle/attitude/current/mAh/mode/horizon/sidebars/crosshair/warning)
+  are migrated with identical on-screen output.
+- `OsdLayout.defaultLayout()` is derived from the registry (single source of truth); editor labels
+  read `labelEn` from the registry.
+- Headless [26]–[28]: layout serialize→load round-trip (position/enabled/per-element unitOverride),
+  unit conversions (10 m/s = 36 km/h = 22.4 mph; 100 m = 328 ft; power = V·A = 168 W), and registry
+  completeness (10/10 TEXT elements render, 5/5 graphic elements return null text).
+
 ## [Unreleased] — Flight-mode parity with Betaflight (3D reversible physics / Horizon / Angle / PID)
 
 ### Added

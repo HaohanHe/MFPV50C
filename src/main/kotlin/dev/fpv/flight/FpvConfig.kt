@@ -413,6 +413,9 @@ class FpvConfig {
      */
     var osdElements: MutableList<OsdElement> = OsdLayout.defaultLayout()
 
+    /** Global OSD unit system: "METRIC" or "IMPERIAL" (per-element override on OsdElement). */
+    var osdUnit: String = Defaults.OSD_UNIT_DEFAULT
+
     /** Raw aux axis for heading-adjust (re-center headfree heading); -1 = off. */
     var headAdjustAxis = -1
 

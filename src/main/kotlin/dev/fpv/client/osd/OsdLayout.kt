@@ -1,21 +1,21 @@
 /*
  * FPV Craft - MIT
- * OSD element registry: data-driven layout. Each element has an id, an enabled
- * flag and a position in guiScaled pixels. Only the elements that are anchored
- * to the screen center (crosshair, artificial horizon, horizon sidebars) ignore
- * their stored x/y and are always drawn centered.
+ * Persisted OSD layout record + default layout. The canonical element specs live
+ * in [dev.fpv.flight.OsdElements.REGISTRY]; this object only maps those specs to
+ * the persisted per-user records (id -> enabled / position / unit override).
  *
- * The live layout lives in [dev.fpv.flight.FpvConfig.osdElements]; this object
- * only owns the canonical element ids and [defaultLayout] used to seed it and
- * by the drag editor.
+ * The live layout lives in [dev.fpv.flight.FpvConfig.osdElements].
  */
 package dev.fpv.client.osd
 
+import dev.fpv.flight.OsdElements
+
 /**
- * One OSD element's layout record.
+ * One OSD element's persisted layout record.
  *
- * @param id             stable identifier, also the translation key suffix
+ * @param id             stable identifier, also the registry key
  * @param centerAnchored true => x/y are ignored and the element centers on screen
+ * @param unitOverride   null => follow the global unit system; else "METRIC"/"IMPERIAL"
  */
 data class OsdElement(
     val id: String,
@@ -23,41 +23,30 @@ data class OsdElement(
     var x: Int,
     var y: Int,
     val centerAnchored: Boolean = false,
+    var unitOverride: String? = null,
 )
 
 object OsdLayout {
 
-    // Stable element ids.
-    const val CROSSHAIR = "crosshair"
-    const val ARTIFICIAL_HORIZON = "artificial_horizon"
-    const val HORIZON_SIDEBARS = "horizon_sidebars"
-    const val SPEED = "speed"
-    const val THROTTLE = "throttle"
-    const val MODE = "mode"
-    const val TARGET = "target"
-    const val BATTERY = "battery"
-    const val LQ = "lq"
-    const val FLIGHT_TIMER = "flight_timer"
-    const val ATTITUDE = "attitude"       // pitch/roll degrees (BF OSD_PITCH/ROLL_ANGLE)
-    const val CURRENT = "current"         // pack current, amps (BF OSD_CURRENT)
-    const val MAH_DRAWN = "mah_drawn"     // consumed charge (BF OSD_MAH_DRAWN)
-    const val CENTER_WARNING = "center_warning" // transient, center-drawn, not movable
+    /** Canonical ids, re-exported from the registry so existing imports keep working. */
+    const val CROSSHAIR = OsdElements.CROSSHAIR
+    const val ARTIFICIAL_HORIZON = OsdElements.ARTIFICIAL_HORIZON
+    const val HORIZON_SIDEBARS = OsdElements.HORIZON_SIDEBARS
+    const val SPEED = OsdElements.SPEED
+    const val THROTTLE = OsdElements.THROTTLE
+    const val MODE = OsdElements.MODE
+    const val TARGET = OsdElements.TARGET
+    const val BATTERY = OsdElements.BATTERY
+    const val LQ = OsdElements.LQ
+    const val FLIGHT_TIMER = OsdElements.FLIGHT_TIMER
+    const val ATTITUDE = OsdElements.ATTITUDE
+    const val CURRENT = OsdElements.CURRENT
+    const val MAH_DRAWN = OsdElements.MAH_DRAWN
+    const val CENTER_WARNING = OsdElements.CENTER_WARNING
 
-    /** Default layout; positions are guiScaled pixels. */
-    fun defaultLayout(): MutableList<OsdElement> = mutableListOf(
-        OsdElement(CROSSHAIR, true, 0, 0, centerAnchored = true),
-        OsdElement(ARTIFICIAL_HORIZON, true, 0, 0, centerAnchored = true),
-        OsdElement(HORIZON_SIDEBARS, true, 0, 0, centerAnchored = true),
-        OsdElement(SPEED, true, 8, 8),
-        OsdElement(MODE, true, 0, 8, centerAnchored = true),
-        OsdElement(TARGET, true, 8, 20),
-        OsdElement(THROTTLE, true, 8, 68),
-        OsdElement(BATTERY, true, 8, 32),
-        OsdElement(LQ, true, 8, 44),
-        OsdElement(FLIGHT_TIMER, true, 8, 56),
-        OsdElement(ATTITUDE, false, 8, 80),
-        OsdElement(CURRENT, false, 8, 92),
-        OsdElement(MAH_DRAWN, false, 8, 104),
-        OsdElement(CENTER_WARNING, true, 0, 0, centerAnchored = true),
-    )
+    /** Default layout, derived from the registry (single source of truth). */
+    fun defaultLayout(): MutableList<OsdElement> =
+        OsdElements.REGISTRY.map { spec ->
+            OsdElement(spec.id, spec.defaultEnabled, spec.defaultX, spec.defaultY, spec.centerAnchored)
+        }.toMutableList()
 }

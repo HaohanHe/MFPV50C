@@ -844,6 +844,77 @@ public class FlightControlCheck {
       check("yaw P/I/D/F = 45/80/0/120 (yaw D=0)", yawP.getP()==45f&&yawP.getI()==80f&&yawP.getD()==0f&&yawP.getF()==120f, "");
     }
 
+    // ---------- 26. OSD registry: layout round-trip + per-element toggle ----------
+    System.out.println("\n[26] OSD data-driven registry: layout round-trip, unit, off=skip");
+    {
+      // default layout derived from registry, no orphan ids
+      var layout = dev.fpv.client.osd.OsdLayout.INSTANCE.defaultLayout();
+      check("default layout covers every registry element",
+        layout.size() == dev.fpv.flight.OsdElements.INSTANCE.getREGISTRY().size(),
+        "n="+layout.size());
+
+      // round-trip: mutate position/enabled/unitOverride, serialize, reload.
+      for (var e : layout) { if (e.getId().equals(dev.fpv.flight.OsdElements.SPEED)) { e.setEnabled(false); e.setX(77); e.setY(31); e.setUnitOverride("IMPERIAL"); } }
+      com.google.gson.Gson gson = new com.google.gson.Gson();
+      String json = gson.toJson(layout);
+      java.lang.reflect.Type t = new com.google.gson.reflect.TypeToken<java.util.List<dev.fpv.client.osd.OsdElement>>(){}.getType();
+      java.util.List<dev.fpv.client.osd.OsdElement> back = gson.fromJson(json, t);
+      var spd = back.stream().filter(x->x.getId().equals(dev.fpv.flight.OsdElements.SPEED)).findFirst().get();
+      check("layout round-trip preserves position", spd.getX()==77 && spd.getY()==31, "x="+spd.getX()+" y="+spd.getY());
+      check("layout round-trip preserves enabled=false (off=not drawn)", !spd.getEnabled(), "en="+spd.getEnabled());
+      check("layout round-trip preserves per-element unitOverride", "IMPERIAL".equals(spd.getUnitOverride()), "u="+spd.getUnitOverride());
+      check("all other ids still present after round-trip", back.size()==layout.size(), "n="+back.size());
+
+      // off=skip: a disabled element's record survives as enabled=false; FpvOsd skips it.
+      check("disabled speed element enabled flag false persists", !spd.getEnabled(), "");
+    }
+
+    // ---------- 27. OSD unit conversions + V/mAh/W formatting ----------
+    System.out.println("\n[27] OSD units: km/h<->mph, m<->ft, V/mAh/W");
+    {
+      var M = dev.fpv.flight.OsdUnit.METRIC; var I = dev.fpv.flight.OsdUnit.IMPERIAL;
+      double kmh = dev.fpv.flight.OsdUnit.Companion.speedDisplay(10f, M);
+      double mph = dev.fpv.flight.OsdUnit.Companion.speedDisplay(10f, I);
+      double ft  = dev.fpv.flight.OsdUnit.Companion.distanceDisplay(100f, I);
+      System.out.printf("    10 m/s = %.1f km/h  = %.1f mph ; 100 m = %.1f ft%n", kmh, mph, ft);
+      check("10 m/s -> 36 km/h", Math.abs(kmh-36.0)<0.1, "kmh="+kmh);
+      check("km/h -> mph factor (36*0.6214)", Math.abs(mph-22.37)<0.5, "mph="+mph);
+      check("100 m -> 328 ft", Math.abs(ft-328.084)<1.0, "ft="+ft);
+
+      // text rendering: speed label flips unit; power = V*A; battery shows V.
+      var tel = new dev.fpv.flight.OsdTelemetry(0,0,0,0, 10f, 0f,0f,0f,0f,0f,0f,
+        16.8f, 4.2f, 82f, 10f, 400f, new float[0], new float[0],
+        96f, 0.45f, false, false, "ACRO", true, 123f, dev.fpv.flight.BatteryStage.OK, false, false);
+      var speed = dev.fpv.flight.OsdElements.INSTANCE.getREGISTRY().stream().filter(x->x.getId().equals(dev.fpv.flight.OsdElements.SPEED)).findFirst().get();
+      String sMet = dev.fpv.flight.OsdFormatter.INSTANCE.text(speed, tel, M);
+      String sImp = dev.fpv.flight.OsdFormatter.INSTANCE.text(speed, tel, I);
+      System.out.println("    speed metric='"+sMet+"' imperial='"+sImp+"'");
+      check("speed metric shows km/h", sMet.contains("km/h"), sMet);
+      check("speed imperial shows mph", sImp.contains("mph") && !sImp.contains("km/h"), sImp);
+      check("power W = V*A = 168W", tel.getWatts()==168.0f, "W="+tel.getWatts());
+      var batt = dev.fpv.flight.OsdElements.INSTANCE.getREGISTRY().stream().filter(x->x.getId().equals(dev.fpv.flight.OsdElements.BATTERY)).findFirst().get();
+      String btxt = dev.fpv.flight.OsdFormatter.INSTANCE.text(batt, tel, M);
+      check("battery text carries V and %", btxt.contains("V") && btxt.contains("%"), btxt);
+      System.out.println("    battery='"+btxt+"'");
+    }
+
+    // ---------- 28. Every TEXT registry element renders; non-text return null ----------
+    System.out.println("\n[28] Registry completeness: each TEXT element produces text, graphics elements null");
+    {
+      var tel = new dev.fpv.flight.OsdTelemetry();
+      int textOk = 0, graphicsNull = 0;
+      for (var spec : dev.fpv.flight.OsdElements.INSTANCE.getREGISTRY()) {
+        String s = dev.fpv.flight.OsdFormatter.INSTANCE.text(spec, tel, dev.fpv.flight.OsdUnit.METRIC);
+        if (spec.getRenderer() == dev.fpv.flight.OsdRenderer.TEXT) { if (s != null) textOk++; }
+        else { if (s == null) graphicsNull++; }
+      }
+      long textTotal = dev.fpv.flight.OsdElements.INSTANCE.getREGISTRY().stream().filter(x->x.getRenderer()==dev.fpv.flight.OsdRenderer.TEXT).count();
+      long graphTotal = dev.fpv.flight.OsdElements.INSTANCE.getREGISTRY().size() - textTotal;
+      System.out.println("    text-rendered="+textOk+"/"+textTotal+"  graphics-null="+graphicsNull+"/"+graphTotal);
+      check("every TEXT element produces a string", textOk == (int)textTotal, "ok="+textOk+"/"+textTotal);
+      check("graphics/banner elements return null text", graphicsNull == (int)graphTotal, "null="+graphicsNull+"/"+graphTotal);
+    }
+
     System.out.println("\n========================================");
     System.out.println(failures == 0 ? "ALL TESTS PASS" : ("FAILURES: " + failures));
     System.exit(failures == 0 ? 0 : 1);

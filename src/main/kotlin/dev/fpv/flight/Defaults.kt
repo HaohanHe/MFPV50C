@@ -216,6 +216,10 @@ object Defaults {
      *  (1/deg per second of error); engineering starting value. */
     const val SIMPLE_RATE_P_GAIN = 0.004f
 
+    // ---- OSD unit system ----
+    /** Default global OSD units: "METRIC" (km/h, m, mAh) or "IMPERIAL" (mph, ft). */
+    const val OSD_UNIT_DEFAULT = "METRIC"
+
     // ---- OSD artificial horizon / pitch ladder (synthetic instrument) ----
     /** Vertical pixels per degree of pitch for the horizon group. */
     const val OSD_PITCH_PX_PER_DEG = 2.0f
