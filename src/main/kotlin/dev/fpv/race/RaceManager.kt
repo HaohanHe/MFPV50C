@@ -98,6 +98,9 @@ object RaceManager {
 
     fun bestRoundMs(): Long = track.bestRoundMs
     fun validLapCount(): Int = track.validLapsMs.size
+
+    /** Index of the last gate crossed (-1 = none). Used by the flight recorder for GATE events. */
+    fun lastCrossGateIndex(): Int = lastCrossGate
     /** Split of the last crossed gate (ms); 0 when none / clock not started. */
     fun lastSplitMs(): Long = lastSplitMs
 

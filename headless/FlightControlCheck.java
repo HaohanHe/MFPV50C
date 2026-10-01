@@ -999,6 +999,67 @@ public class FlightControlCheck {
       check("new-element toggle off survives round-trip", !varioEl.getEnabled(), "en="+varioEl.getEnabled());
     }
 
+    // ---------- 31. Replay recorder v2: field round-trip, motor/cam/events, atomic, NaN-free ----------
+    System.out.println("\n[31] Flight recorder v2: write->read round-trip, events, atomic, no NaN");
+    {
+      var recs = new java.util.ArrayList<dev.fpv.replay.ReplayFile.Rec>();
+      for (int i = 0; i < 50; i++) {
+        var rr = new dev.fpv.replay.ReplayFile.Rec();
+        rr.setTSec(i * 0.01); rr.setX(i + 0.5); rr.setY(10.0 + i); rr.setZ(-3.0);
+        rr.setQx(0.1f * i); rr.setQy(0.2f); rr.setQz(0.3f); rr.setQw(0.9f);
+        rr.setVx(0.01f * i); rr.setVy(-0.02f); rr.setVz(0.03f);
+        rr.setGx(10f + i); rr.setGy(20f); rr.setGz(30f);
+        rr.setVbat(24f);
+        rr.setLq(95f);
+        rr.setRollCmd(0.1f * i); rr.setPitchCmd(-0.2f); rr.setYawCmd(0.3f); rr.setThrCmd(0.5f);
+        rr.setArmed(true); rr.setModeCode(i % 3);
+        for (int k = 0; k < 4; k++) rr.getMotor()[k] = 0.1f * (i + k);
+        rr.setCamFovDeg(75f); rr.setCamTiltDeg(25f); rr.setPhase((i % 10) / 10f);
+        recs.add(rr);
+      }
+      var evs = java.util.List.of(
+        new dev.fpv.replay.ReplayEvent(0.0, dev.fpv.replay.ReplayEvent.ARM, 0),
+        new dev.fpv.replay.ReplayEvent(0.5, dev.fpv.replay.ReplayEvent.GATE, 2),
+        new dev.fpv.replay.ReplayEvent(0.9, dev.fpv.replay.ReplayEvent.DISARM, 0));
+
+      java.nio.file.Path tmp;
+      try { tmp = java.nio.file.Files.createTempDirectory("fpr"); }
+      catch (java.io.IOException ex) { throw new RuntimeException(ex); }
+      var out = tmp.resolve("roundtrip.fpr");
+      dev.fpv.replay.ReplayFile.Companion.write(out, 120f, "2026-01-01T00:00:00", recs, evs);
+
+      // no atomic temp leftover
+      check("atomic write leaves no .tmp sibling", tmp.toFile().listFiles((f,n)->n.endsWith(".tmp")).length == 0, "tmp");
+      check("file exists non-empty", out.toFile().length() > 0, "bytes="+out.toFile().length());
+
+      var f = dev.fpv.replay.ReplayFile.Companion.read(out);
+      check("sample count round-trips (50)", f.getCount() == 50, "n="+f.getCount());
+      check("x[5] round-trips", Math.abs(f.getPx()[5] - 5.5) < 1e-9, "x="+f.getPx()[5]);
+      check("gx[10] round-trips", Math.abs(f.getGx()[10] - 20f) < 1e-6, "gx="+f.getGx()[10]);
+      check("motor[0][3] round-trips", Math.abs(f.getMotor()[0][3] - 0.3f) < 1e-6, "m03="+f.getMotor()[0][3]);
+      check("camTilt[0]=25", Math.abs(f.getCamTiltDeg()[0] - 25f) < 1e-6, "tilt="+f.getCamTiltDeg()[0]);
+      check("phase[7]=0.7", Math.abs(f.getPhase()[7] - 0.7f) < 1e-6, "ph="+f.getPhase()[7]);
+      check("events round-trip (3)", f.getEvents().size() == 3, "ev="+f.getEvents().size());
+      check("event[1] is GATE@2", f.getEvents().get(1).getCode()==dev.fpv.replay.ReplayEvent.GATE && f.getEvents().get(1).getArg()==2, f.getEvents().get(1).toString());
+
+      // no NaN/Inf in read back
+      boolean nan = false;
+      for (float fl : f.getGx()) if (!Float.isFinite(fl)) nan = true;
+      for (float fl : f.getMotor()[0]) if (!Float.isFinite(fl)) nan = true;
+      check("read-back contains no NaN/Inf", !nan, "");
+
+      // cleanFloat guard
+      check("cleanFloat(NaN)=0", dev.fpv.replay.ReplayFile.Companion.cleanFloat(Float.NaN) == 0f, "");
+      check("cleanFloat(Inf)=0", dev.fpv.replay.ReplayFile.Companion.cleanFloat(Float.POSITIVE_INFINITY) == 0f, "");
+      check("cleanFloat(3.5)=3.5", dev.fpv.replay.ReplayFile.Companion.cleanFloat(3.5f) == 3.5f, "");
+
+      // interpolation still works
+      var s = new dev.fpv.replay.ReplaySample(0.0,0.0,0.0,0.0, 0f,0f,0f,1f, 0f,0f,0f, 0f,0f,0f, 0f,0f,0f, 0f,0f,0f, 0f,0f,0f,0f, false,0,new float[32]);
+      f.sampleAt(0.25, s);
+      check("sampleAt interpolated attitude finite", Float.isFinite(s.getQx()) && s.getTSec()>0, "qx="+s.getQx());
+      System.out.println("    wrote/read="+f.getCount()+" events="+f.getEvents().size()+" x5="+f.getPx()[5]+" m03="+f.getMotor()[0][3]);
+    }
+
     System.out.println("\n========================================");
     System.out.println(failures == 0 ? "ALL TESTS PASS" : ("FAILURES: " + failures));
     System.exit(failures == 0 ? 0 : 1);

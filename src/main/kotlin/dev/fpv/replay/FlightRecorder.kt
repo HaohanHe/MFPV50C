@@ -41,7 +41,8 @@ object FlightRecorder {
     var lastSaved: Path? = null
         private set
 
-    private val records = ArrayList<ReplayFile.Rec>()
+    private val records = ArrayDeque<ReplayFile.Rec>()
+    private val events = ArrayList<ReplayEvent>()
     private var sampleAccumulator = 0f
     private var sessionClock = 0f
 
@@ -50,6 +51,11 @@ object FlightRecorder {
     private var prevVx = 0f; private var prevVy = 0f; private var prevVz = 0f
     // Session clock of the last written sample (drives the accel window).
     private var prevSampleClock = 0.0
+
+    // Edge-detected event state.
+    private var prevArmed = false
+    private var prevModeCode = -1
+    private var prevGate = -1
 
     private val stampFmt = DateTimeFormatter.ofPattern("yyyyMMdd_HHmmss")
 
@@ -65,21 +71,26 @@ object FlightRecorder {
             ?: emptyList()
     }
 
-    /** Begin a new recording. No-op if already recording. */
+    /** Begin a new recording. No-op if already recording or recording disabled. */
     fun start(): Boolean {
         if (recording) return false
+        if (!(FpvClient.config.replay ?: ReplayConfig()).recordingEnabled) return false
         records.clear()
+        events.clear()
         sampleAccumulator = 0f
         sessionClock = 0f
         recordedSec = 0f
         sampleCount = 0
         hasPrevVel = false
         prevSampleClock = 0.0
+        prevArmed = FpvClient.armed
+        prevModeCode = FpvClient.flight.currentMode.ordinal
+        prevGate = -1
         recording = true
         return true
     }
 
-    /** Stop and flush to disk. Returns the saved file, or null when empty. */
+    /** Stop and flush to disk atomically. Returns the saved file, or null when empty. */
     fun stop(): Path? {
         if (!recording) return null
         recording = false
@@ -89,9 +100,10 @@ object FlightRecorder {
         val name = "rec_" + LocalDateTime.now().format(stampFmt) + ".fpr"
         val out = dir.resolve(name)
         val cfg = FpvClient.config.replay ?: ReplayConfig()
-        ReplayFile.write(out, cfg.sampleRateHz, LocalDateTime.now().toString(), records)
+        ReplayFile.write(out, cfg.sampleRateHz, LocalDateTime.now().toString(), records.toList(), events.toList())
         lastSaved = out
         records.clear()
+        events.clear()
         return out
     }
 
@@ -99,6 +111,7 @@ object FlightRecorder {
     fun abort() {
         recording = false
         records.clear()
+        events.clear()
         sampleCount = 0
         recordedSec = 0f
     }
@@ -164,8 +177,34 @@ object FlightRecorder {
         rec.armed = FpvClient.armed
         rec.modeCode = FpvClient.flight.currentMode.ordinal
         val auxSrc = channels.aux
-        for (k in 0 until ReplaySample.AUX_SLOTS) rec.aux[k] = auxSrc.getOrElse(k) { 0f }
-        records.add(rec)
+        for (k in 0 until ReplaySample.AUX_SLOTS) rec.aux[k] = ReplayFile.cleanFloat(auxSrc.getOrElse(k) { 0f })
+        // v2: four mixer outputs + camera + subframe phase.
+        val mn = FpvClient.flight.readMotorNorm()
+        for (k in 0 until ReplaySample.MOTOR_SLOTS) rec.motor[k] = ReplayFile.cleanFloat(mn.getOrElse(k) { 0f })
+        rec.camTiltDeg = ReplayFile.cleanFloat(FpvClient.config.activeAirframe().cameraTiltDeg)
+        rec.camFovDeg = ReplaySample.DEFAULT_FOV_DEG
+        rec.phase = (sampleAccumulator / (1f / cfg.sampleRateHz.coerceIn(25f, 240f)))
+
+        // NaN/Inf defence: never write a non-finite value into the ring.
+        rec.qx = ReplayFile.cleanFloat(rec.qx); rec.qy = ReplayFile.cleanFloat(rec.qy); rec.qz = ReplayFile.cleanFloat(rec.qz); rec.qw = ReplayFile.cleanFloat(rec.qw)
+        rec.vx = ReplayFile.cleanFloat(rec.vx); rec.vy = ReplayFile.cleanFloat(rec.vy); rec.vz = ReplayFile.cleanFloat(rec.vz)
+        rec.gx = ReplayFile.cleanFloat(rec.gx); rec.gy = ReplayFile.cleanFloat(rec.gy); rec.gz = ReplayFile.cleanFloat(rec.gz)
+        rec.ax = ReplayFile.cleanFloat(rec.ax); rec.ay = ReplayFile.cleanFloat(rec.ay); rec.az = ReplayFile.cleanFloat(rec.az)
+
+        // Discrete events (edge-detected, independent of the sample decimation).
+        if (FpvClient.armed != prevArmed) events.add(ReplayEvent(sessionClock.toDouble(),
+            if (FpvClient.armed) ReplayEvent.ARM else ReplayEvent.DISARM, 0))
+        prevArmed = FpvClient.armed
+        if (rec.modeCode != prevModeCode) events.add(ReplayEvent(sessionClock.toDouble(), ReplayEvent.MODE, rec.modeCode))
+        prevModeCode = rec.modeCode
+        val gate = dev.fpv.race.RaceManager.lastCrossGateIndex()
+        if (gate >= 0 && gate != prevGate) events.add(ReplayEvent(sessionClock.toDouble(), ReplayEvent.GATE, gate))
+        if (gate >= 0) prevGate = gate
+
+        // Ring buffer: bound memory by dropping the oldest samples on long runs.
+        records.addLast(rec)
+        val cap = cfg.maxSamples.coerceAtLeast(256)
+        while (records.size > cap) records.removeFirst()
         sampleCount = records.size
     }
 

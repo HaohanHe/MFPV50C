@@ -230,11 +230,20 @@ class ServerCompatConfig {
 
 /** Recording + playback knobs for the data-driven replay system (dev.fpv.replay). */
 class ReplayConfig {
+    /** Master switch: when false, the recorder never arms (no samples buffered). */
+    var recordingEnabled: Boolean = true
+
     /** "FIXED" = decimate to [sampleRateHz]; "FRAME" = write every rendered frame. */
     var recordingMode: String = "FIXED"
 
     /** Fixed sampling rate when recordingMode = FIXED (Hz, 25..240). */
     var sampleRateHz: Float = 120f
+
+    /**
+     * Ring-buffer cap on held samples before a stop (bounds memory on long runs;
+     * oldest samples dropped). ~4 min at 120 Hz.
+     */
+    var maxSamples: Int = 30000
 
     /** Raw AUX axis that toggles recording (rising edge); -1 = keyboard/GUI only. */
     var recordAuxAxis: Int = -1

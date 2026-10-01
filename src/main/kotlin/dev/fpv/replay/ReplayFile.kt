@@ -50,7 +50,7 @@ import java.nio.file.Path
  * rendered frame: once by the CameraMixin path, once by the exporter loop).
  * Callers must treat the result as valid only until the next sampleAt() call.
  */
-class ReplaySample(
+class ReplaySample @JvmOverloads constructor(
     tSecIn: Double,
     xIn: Double, yIn: Double, zIn: Double,
     qxIn: Float, qyIn: Float, qzIn: Float, qwIn: Float,
@@ -62,6 +62,11 @@ class ReplaySample(
     armedIn: Boolean,
     modeCodeIn: Int,
     auxIn: FloatArray,
+    // ---- v2 additions (defaults keep the v1 positional construction source-compatible) ----
+    motorIn: FloatArray = FloatArray(MOTOR_SLOTS),
+    camFovDegIn: Float = DEFAULT_FOV_DEG,
+    camTiltDegIn: Float = 25f,
+    phaseIn: Float = 0f,
 ) {
     var tSec: Double = tSecIn
     var x: Double = xIn; var y: Double = yIn; var z: Double = zIn
@@ -75,11 +80,20 @@ class ReplaySample(
     var armed: Boolean = armedIn
     var modeCode: Int = modeCodeIn
     var aux: FloatArray = auxIn
+    // v2
+    var motor: FloatArray = motorIn.copyOf(MOTOR_SLOTS)
+    var camFovDeg: Float = camFovDegIn
+    var camTiltDeg: Float = camTiltDegIn
+    /** Sub-frame phase 0..1 (which control tick this pose was sampled at). */
+    var phase: Float = phaseIn
 
     fun attitude(out: Quaternionf): Quaternionf = out.set(qx, qy, qz, qw).normalize()
 
     companion object {
         const val AUX_SLOTS = 32
+        const val MOTOR_SLOTS = 4
+        const val DEFAULT_FOV_DEG = 75f
+        const val FORMAT_VERSION = 2
         const val HEADER_BYTES = 4 + 4 + 4 + 4 + 32 + 56
         const val RECORD_BYTES =
             8 * 4 +   // tSec, x, y, z
@@ -91,7 +105,40 @@ class ReplaySample(
             4 +       // lq
             4 * 4 +   // rc cmd
             4 + 4 +   // armed, modeCode
-            4 * AUX_SLOTS
+            4 * AUX_SLOTS +
+            4 * MOTOR_SLOTS +   // v2: four mixer outputs
+            4 + 4 + 4           // v2: camFov, camTilt, subframe phase
+
+        /** Self-describing field schema (clean-room, betaflight-blackbox inspired). */
+        val FIELD_SCHEMA: List<FieldDesc> = listOf(
+            FieldDesc("tSec", "f64", "session seconds"),
+            FieldDesc("x", "f64", "world blocks"), FieldDesc("y", "f64", "world blocks"), FieldDesc("z", "f64", "world blocks"),
+            FieldDesc("qx", "f32", "attitude"), FieldDesc("qy", "f32", "attitude"), FieldDesc("qz", "f32", "attitude"), FieldDesc("qw", "f32", "attitude"),
+            FieldDesc("vx", "f32", "blocks/tick"), FieldDesc("vy", "f32", "blocks/tick"), FieldDesc("vz", "f32", "blocks/tick"),
+            FieldDesc("gx", "f32", "dps [pitch]"), FieldDesc("gy", "f32", "dps [roll]"), FieldDesc("gz", "f32", "dps [yaw]"),
+            FieldDesc("ax", "f32", "blocks/s^2"), FieldDesc("ay", "f32", "blocks/s^2"), FieldDesc("az", "f32", "blocks/s^2"),
+            FieldDesc("vbat", "f32", "V"), FieldDesc("mAh", "f32", "drawn"), FieldDesc("lq", "f32", "%"),
+            FieldDesc("rollCmd", "f32", "rc norm"), FieldDesc("pitchCmd", "f32", "rc norm"),
+            FieldDesc("yawCmd", "f32", "rc norm"), FieldDesc("thrCmd", "f32", "rc norm"),
+            FieldDesc("armed", "i32", "0/1"), FieldDesc("modeCode", "i32", "flight mode ordinal"),
+            FieldDesc("aux", "f32[32]", "aux axes"),
+            FieldDesc("motor", "f32[4]", "mixer outputs"),
+            FieldDesc("camFovDeg", "f32", "camera fov"), FieldDesc("camTiltDeg", "f32", "camera tilt"),
+            FieldDesc("phase", "f32", "subframe 0..1"),
+        )
+    }
+}
+
+/** One descriptor row in [ReplaySample.FIELD_SCHEMA]. */
+data class FieldDesc(val name: String, val type: String, val doc: String)
+
+/** A discrete event between samples (arm/disarm/gate/mode). */
+data class ReplayEvent(val tSec: Double, val code: Int, val arg: Int) {
+    companion object {
+        const val ARM = 1
+        const val DISARM = 2
+        const val GATE = 3
+        const val MODE = 4
     }
 }
 
@@ -112,6 +159,11 @@ class ReplayFile(
     val armed: BooleanArray,
     val modeCode: IntArray,
     val aux: Array<FloatArray>,
+    val motor: Array<FloatArray> = Array(0) { FloatArray(ReplaySample.MOTOR_SLOTS) },
+    val camFovDeg: FloatArray = FloatArray(0),
+    val camTiltDeg: FloatArray = FloatArray(0),
+    val phase: FloatArray = FloatArray(0),
+    val events: List<ReplayEvent> = emptyList(),
 ) {
     val durationSec: Double get() = if (count == 0) 0.0 else t[count - 1] - t[0]
 
@@ -161,6 +213,14 @@ class ReplayFile(
         out.yawCmd = fl(rcYaw); out.thrCmd = fl(rcThr)
         out.armed = if (u < 0.5f) armed[i0] else armed[i1]
         out.modeCode = if (u < 0.5f) modeCode[i0] else modeCode[i1]
+        // v2 per-frame extended fields (absent in v1 files -> defaults).
+        if (motor.isNotEmpty()) {
+            val m0 = motor[i0]; val m1 = motor[i1]
+            for (k in 0 until ReplaySample.MOTOR_SLOTS) out.motor[k] = m0[k] + (m1[k] - m0[k]) * u
+        }
+        if (camFovDeg.isNotEmpty()) out.camFovDeg = camFovDeg[i0] + (camFovDeg[i1] - camFovDeg[i0]) * u
+        if (camTiltDeg.isNotEmpty()) out.camTiltDeg = camTiltDeg[i0] + (camTiltDeg[i1] - camTiltDeg[i0]) * u
+        if (phase.isNotEmpty()) out.phase = phase[i0] + (phase[i1] - phase[i0]) * u
         val dst = out.aux
         if (i0 == i1) {
             System.arraycopy(aux[i0], 0, dst, 0, minOf(dst.size, aux[i0].size))
@@ -172,8 +232,12 @@ class ReplayFile(
         return out
     }
 
-    /** Read a .fpr file. Throws on magic/version mismatch. */
+    /** Read a .fpr file. Throws on magic/version mismatch; v1 files migrate by defaults. */
     companion object {
+        /** v1 fixed record size (pre motor/camera/phase fields). */
+        private const val RECORD_BYTES_V1 =
+            8 * 4 + 4 * 4 + 3 * 4 + 3 * 4 + 3 * 4 + 2 * 4 + 4 + 4 * 4 + 4 + 4 + 4 * ReplaySample.AUX_SLOTS
+
         fun read(path: Path): ReplayFile {
             DataInputStream(Files.newInputStream(path).buffered()).use { d ->
                 val magic = ByteArray(4)
@@ -181,14 +245,15 @@ class ReplayFile(
                 val m = String(magic, Charsets.US_ASCII)
                 check(m == "FPVR") { "Not an .fpr file: $path (magic=$m)" }
                 val version = d.readInt()
-                check(version == 1) { "Unsupported .fpr version $version" }
+                check(version == 1 || version == ReplaySample.FORMAT_VERSION) { "Unsupported .fpr version $version" }
                 val rate = d.readFloat()
                 val auxSlots = d.readInt()
                 check(auxSlots == ReplaySample.AUX_SLOTS) { "aux slots mismatch" }
                 val iso = ByteArray(32); d.readFully(iso)
                 d.skipBytes(56) // reserved
+                val recBytes = if (version == 1) RECORD_BYTES_V1 else ReplaySample.RECORD_BYTES
                 val len = Files.size(path) - ReplaySample.HEADER_BYTES
-                val n = (len / ReplaySample.RECORD_BYTES).toInt()
+                val n = (len / recBytes).toInt()
                 val t = DoubleArray(n)
                 val px = DoubleArray(n); val py = DoubleArray(n); val pz = DoubleArray(n)
                 val qx = FloatArray(n); val qy = FloatArray(n); val qz = FloatArray(n); val qw = FloatArray(n)
@@ -200,6 +265,8 @@ class ReplayFile(
                 val rcYaw = FloatArray(n); val rcThr = FloatArray(n)
                 val armed = BooleanArray(n); val modeCode = IntArray(n)
                 val aux = Array(n) { FloatArray(ReplaySample.AUX_SLOTS) }
+                val motor = Array(n) { FloatArray(ReplaySample.MOTOR_SLOTS) }
+                val camFov = FloatArray(n); val camTilt = FloatArray(n); val phase = FloatArray(n)
                 for (i in 0 until n) {
                     t[i] = d.readDouble()
                     px[i] = d.readDouble(); py[i] = d.readDouble(); pz[i] = d.readDouble()
@@ -213,27 +280,44 @@ class ReplayFile(
                     armed[i] = d.readInt() != 0
                     modeCode[i] = d.readInt()
                     for (k in aux[i].indices) aux[i][k] = d.readFloat()
+                    if (version >= ReplaySample.FORMAT_VERSION) {
+                        for (k in motor[i].indices) motor[i][k] = d.readFloat()
+                        camFov[i] = d.readFloat(); camTilt[i] = d.readFloat(); phase[i] = d.readFloat()
+                    } else {
+                        camFov[i] = ReplaySample.DEFAULT_FOV_DEG
+                    }
+                }
+                // v2 event block: int32 count, then (f64 tSec, i32 code, i32 arg) each.
+                val events = ArrayList<ReplayEvent>()
+                if (version >= ReplaySample.FORMAT_VERSION) {
+                    val ec = d.readInt()
+                    for (k in 0 until ec) events.add(ReplayEvent(d.readDouble(), d.readInt(), d.readInt()))
                 }
                 return ReplayFile(
                     path, rate, String(iso, Charsets.US_ASCII).trimEnd('\u0000'),
                     n, t, px, py, pz, qx, qy, qz, qw, vx, vy, vz,
                     gx, gy, gz, ax, ay, az, vbat, mAh, lq,
                     rcRoll, rcPitch, rcYaw, rcThr, armed, modeCode, aux,
+                    motor, camFov, camTilt, phase, events,
                 )
             }
         }
 
-        /** Write a complete .fpr from an in-memory record list. */
+        /** Replace any non-finite (NaN/Inf) float with 0f (recorder pre-write guard). */
+        fun cleanFloat(v: Float): Float = if (v.isFinite()) v else 0f
+
+        /** Write a complete .fpr (v2) from an in-memory record list + events. */
         fun write(
             path: Path,
             sampleRateHz: Float,
             startIso: String,
             records: List<Rec>,
+            events: List<ReplayEvent> = emptyList(),
         ) {
             val buf = java.io.ByteArrayOutputStream()
             DataOutputStream(buf.buffered()).use { d ->
                 d.writeBytes("FPVR")
-                d.writeInt(1)
+                d.writeInt(ReplaySample.FORMAT_VERSION)
                 d.writeFloat(sampleRateHz)
                 d.writeInt(ReplaySample.AUX_SLOTS)
                 val iso = ByteArray(32)
@@ -254,7 +338,13 @@ class ReplayFile(
                     d.writeInt(r.modeCode)
                     val a = r.aux
                     for (k in 0 until ReplaySample.AUX_SLOTS) d.writeFloat(a.getOrElse(k) { 0f })
+                    val mo = r.motor
+                    for (k in 0 until ReplaySample.MOTOR_SLOTS) d.writeFloat(mo.getOrElse(k) { 0f })
+                    d.writeFloat(r.camFovDeg); d.writeFloat(r.camTiltDeg); d.writeFloat(r.phase)
                 }
+                // Event block.
+                d.writeInt(events.size)
+                for (e in events) { d.writeDouble(e.tSec); d.writeInt(e.code); d.writeInt(e.arg) }
             }
             // Atomic finalize: a crash at stop can never leave a truncated .fpr.
             dev.fpv.flight.AtomicFiles.writeBytes(path, buf.toByteArray())
@@ -272,5 +362,10 @@ class ReplayFile(
         var rollCmd = 0f; var pitchCmd = 0f; var yawCmd = 0f; var thrCmd = 0f
         var armed = false; var modeCode = 0
         var aux: FloatArray = FloatArray(ReplaySample.AUX_SLOTS)
+        // v2
+        var motor: FloatArray = FloatArray(ReplaySample.MOTOR_SLOTS)
+        var camFovDeg: Float = ReplaySample.DEFAULT_FOV_DEG
+        var camTiltDeg: Float = 25f
+        var phase: Float = 0f
     }
 }

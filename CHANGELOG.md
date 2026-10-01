@@ -8,6 +8,20 @@ revision. No formal GitHub Release is published until real-hardware acceptance.
 
 ## [Unreleased] — OSD refactor: data-driven element registry
 
+### Added (P-A: schema-driven flight recorder v2)
+- **`.fpr` format bumped to v2** (`replay/ReplayFile.kt`): per-sample now records four mixer outputs
+  (`motor[4]`, signed in 3D), camera FOV/tilt, and sub-frame `phase`; plus a discrete **event block**
+  (ARM / DISARM / GATE / MODE, timestamped). v1 files still parse (missing fields default). A
+  self-describing `ReplaySample.FIELD_SCHEMA` (name/type/doc) documents every field (betaflight-blackbox
+  field-schema idea, clean-room).
+- **Bounded ring buffer** (`replay/FlightRecorder.kt`): samples kept in an `ArrayDeque` ring capped by
+  `ReplayConfig.maxSamples` (default 30000 ≈ 4 min @120 Hz); oldest dropped on long runs so memory stays
+  bounded. New `recordingEnabled` master switch.
+- **NaN/Inf defence**: every sample field passes `ReplayFile.cleanFloat()` before storage; the file never
+  holds a non-finite value. Atomic write via `flight/AtomicFiles` leaves no half-written file.
+- headless [31]: write→read field round-trip (pos, gyro, motor[4], camTilt, phase), event block, no atomic
+  temp leftover, read-back NaN-free, interpolation intact.
+
 ### Added (B2 batch elements, real telemetry)
 - **Core flight telemetry widgets**: vario (vertical speed m/s·f/s with ▲/▼ arrow), numeric heading
   (0–359 + compass letter N/NE/E…), true ground speed (body horizontal speed, replacing player-movement
