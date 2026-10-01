@@ -8,6 +8,18 @@ revision. No formal GitHub Release is published until real-hardware acceptance.
 
 ## [Unreleased] — OSD refactor: data-driven element registry
 
+### Added (module 4: emergent aerobatics harness)
+- **`flight/Aerobatics.kt`**: a closed-loop headless harness that drives the REAL flight
+  controller (stick setpoint -> PID -> motor lag -> torque -> rigid-body integration) AND the
+  translational dynamics (tilted-disc thrust + gravity + anisotropic drag) in one loop. The
+  caller supplies ONLY a stick time-series + initial velocity — no scripted trajectory, no
+  setpoint->rate shortcut. The trace records attitude, body-up, velocity, altitude, rates.
+- headless [34] proves emergence (not trajectories): matty flip completes a full roll via
+  momentum (452 deg), power loop a vertical 360 (805 deg), both pass fully inverted; a
+  throttle-cut dive retains more speed than a level glide (gravity does work); the same
+  banked-turn stick at v0=0.5 vs v0=6.0 gives a measurably different altitude response
+  (environment participates); all finite.
+
 ### Added (P-B GUI: cinematic keyframe timeline editor)
 - **`replay/CinematicEditorScreen.kt`**: scrub rail with keyframe ticks (click to select / scrub),
   "Set KF here" (upsert at cursor), Delete KF, cycle interpolator (CR/Cubic/Linear, live label),

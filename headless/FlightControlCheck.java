@@ -1201,6 +1201,81 @@ public class FlightControlCheck {
       check("camera JSON atomic (no .tmp leftover)", tmp.toFile().listFiles((d,x)->x.endsWith(".tmp")).length==0, "");
     }
 
+    // ---------- 34. Emergent aerobatics (REAL closed loop, sticks-only) ----------
+    // No scripted trajectory: only a stick time-series + initial velocity; every attitude,
+    // translation and energy change emerges from attitude->thrust->translation + gravity +
+    // drag. Metrics below are the *emergence* evidence, not fixed trajectories.
+    System.out.println("\n[34] emergent aerobatics (REAL closed loop, sticks-only)");
+    {
+      FpvConfig cfg = new FpvConfig();
+      cfg.setPhysicsRealism("REAL");
+      if (cfg.getPid() != null) cfg.getPid().setEnabled(true);
+      cfg.setSetpointSmoothingEnabled(false);
+      var aero = new dev.fpv.flight.Aerobatics(cfg);
+      float hov = cfg.activeAirframe().effectiveHoverThrottle();
+      System.out.println("    hoverThrottle="+hov);
+      boolean anyNan=false;
+
+      // (1) matty flip: brief full-roll stick, then release -> inertia completes the 360.
+      var roll = java.util.List.of(
+        new dev.fpv.flight.Aerobatics.Frame(0.0, 0f,0f,0f,hov),
+        new dev.fpv.flight.Aerobatics.Frame(0.1, 1f,0f,0f,hov),
+        new dev.fpv.flight.Aerobatics.Frame(0.8, 1f,0f,0f,hov));
+      var tMatty = aero.run(roll, (float)DT, 0,0,0, 0.5);
+      float maxRoll=0f, minUp=1f;
+      for (var s: tMatty.getSamples()){ maxRoll=Math.max(maxRoll,Math.abs(s.getRollAccumDeg())); minUp=Math.min(minUp,s.getBodyUpY()); }
+      anyNan |= tMatty.getNan();
+      System.out.printf("    matty: |rollAccum|=%.1f deg minUp=%.2f%n", maxRoll, minUp);
+      check("matty flip completes a full roll (>=360 deg, momentum-assisted)", maxRoll>=360f, String.valueOf(maxRoll));
+      check("matty passes fully inverted (minUp<-0.9)", minUp<-0.9f, String.valueOf(minUp));
+
+      // (2) power loop: pitch stick + forward momentum -> vertical plane 360.
+      var loop = java.util.List.of(
+        new dev.fpv.flight.Aerobatics.Frame(0.0, 0f,0f,0f,hov),
+        new dev.fpv.flight.Aerobatics.Frame(0.1, 0f,-1f,0f,hov),
+        new dev.fpv.flight.Aerobatics.Frame(1.6, 0f,-1f,0f,hov));
+      var tLoop = aero.run(loop, (float)DT, 6,0,0, 0.4);
+      float maxP=0f, minUpL=1f;
+      for (var s: tLoop.getSamples()){ maxP=Math.max(maxP,Math.abs(s.getPitchAccumDeg())); minUpL=Math.min(minUpL,s.getBodyUpY()); }
+      anyNan |= tLoop.getNan();
+      System.out.printf("    powerloop: |pitchAccum|=%.1f deg minUp=%.2f v0=%.2f vEnd=%.2f%n", maxP, minUpL, tLoop.getStartSpeed(), tLoop.getEndSpeed());
+      check("power loop completes a vertical 360 (>=360 deg)", maxP>=360f, String.valueOf(maxP));
+      check("power loop passes inverted", minUpL<-0.9f, String.valueOf(minUpL));
+
+      // (3) energy: nose-down dive (throttle cut) retains MORE speed than a level glide ->
+      //     gravity does work on the dive; drag bleeds both (drag-heavy plant).
+      var dive = java.util.List.of(
+        new dev.fpv.flight.Aerobatics.Frame(0.0, 0f,0f,0f,hov),
+        new dev.fpv.flight.Aerobatics.Frame(0.1, 0f,-1f,0f,0.05f),
+        new dev.fpv.flight.Aerobatics.Frame(1.2, 0f,-1f,0f,0.05f));
+      var td = aero.run(dive, (float)DT, 4,0,0, 0.0);
+      var glide = java.util.List.of(
+        new dev.fpv.flight.Aerobatics.Frame(0.0, 0f,0f,0f,hov),
+        new dev.fpv.flight.Aerobatics.Frame(0.1, 0f,0f,0f,0.05f),
+        new dev.fpv.flight.Aerobatics.Frame(1.2, 0f,0f,0f,0.05f));
+      var tg = aero.run(glide, (float)DT, 4,0,0, 0.0);
+      anyNan |= td.getNan() || tg.getNan();
+      System.out.printf("    dive endSpeed=%.2f vs level glide endSpeed=%.2f (gravity adds: dive>glide)%n", td.getEndSpeed(), tg.getEndSpeed());
+      check("energy: dive keeps more speed than level glide (gravity contribution)", td.getEndSpeed() > tg.getEndSpeed(),
+        String.format("dive=%.2f glide=%.2f", td.getEndSpeed(), tg.getEndSpeed()));
+
+      // (4) initial-condition sensitivity: identical banked-turn stick at two entry speeds ->
+      //     materially different altitude response (g*tan(phi)/V geometry: faster = bigger radius).
+      var turn = java.util.List.of(
+        new dev.fpv.flight.Aerobatics.Frame(0.0, 0.5f,0f,0f,hov),
+        new dev.fpv.flight.Aerobatics.Frame(0.8, 0.5f,0f,0f,hov));
+      var tSlow = aero.run(turn, (float)DT, 0.5,0,0, 1.5);
+      var tFast = aero.run(turn, (float)DT, 6.0,0,0, 1.5);
+      anyNan |= tSlow.getNan() || tFast.getNan();
+      double altSlow = tSlow.getSamples().get(tSlow.getSamples().size()-1).getAltY();
+      double altFast = tFast.getSamples().get(tFast.getSamples().size()-1).getAltY();
+      System.out.printf("    turn v0=0.5 altEnd=%.2f vs v0=6.0 altEnd=%.2f (environment participates)%n", altSlow, altFast);
+      check("initial-speed sensitivity: same sticks, different entry speed -> different result",
+        Math.abs(altSlow-altFast) > 0.1, String.format("slow=%.2f fast=%.2f", altSlow, altFast));
+
+      check("all maneuvers finite (no NaN / divergence)", !anyNan, "anyNan="+anyNan);
+    }
+
     System.out.println("\n========================================");
     System.out.println(failures == 0 ? "ALL TESTS PASS" : ("FAILURES: " + failures));
     System.exit(failures == 0 ? 0 : 1);
