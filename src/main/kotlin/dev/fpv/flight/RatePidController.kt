@@ -69,7 +69,7 @@ class RatePidController(private val cfg: FpvConfig) {
         const val SUM_LIMIT_YAW = 400f         // published yaw pidSumLimit
         const val OUTPUT_CLAMP_DPS = 2000f     // engineering sanity clamp
         const val D_REF_RATE_DPS = 500f        // setpoint where D LPF is fully open
-        const val RELAX_K = 0.02f              // engineering relax steepness
+        const val RELAX_HPF_DPS = 40f         // published BF itermRelax hpf cutoff (dps)
         const val ANTI_GRAV_MAX = 10f          // engineering boost ceiling
     }
 
@@ -246,7 +246,11 @@ class RatePidController(private val cfg: FpvConfig) {
         val spTransient = sp - axis.setpointLp.update(sp, dt)
         val measTransient = meas - axis.measuredLp.update(meas, dt)
         val input = if (pidCfg.itermRelaxType == "GYRO") measTransient else spTransient
-        return 1f / (1f + abs(input) * RELAX_K)
+        // Published BF pid.c:885-905: hard threshold, factor = max(0, 1 - hpf/40).
+        // At/above RELAX_HPF_DPS dps the integrator is fully frozen (not asymptotic).
+        val hpf = abs(input)
+        val factor = 1f - hpf / RELAX_HPF_DPS
+        return if (factor < 0f) 0f else factor
     }
 
     /**

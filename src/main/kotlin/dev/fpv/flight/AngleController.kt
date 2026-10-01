@@ -12,6 +12,7 @@ import org.joml.Vector3f
 import kotlin.math.PI
 import kotlin.math.abs
 import kotlin.math.max
+import kotlin.math.min
 
 /**
  * Angle / Horizon self-leveling.
@@ -39,6 +40,13 @@ class AngleController {
     var targetRollDeg = 0f
         private set
     var targetPitchDeg = 0f
+        private set
+
+    /** Horizon leveling-strength rise filter state (PT1; rise-limited, fall immediate). */
+    private var horizonSmoothed = 0f
+
+    /** Latest computed horizon leveling strength 0..1 (telemetry / headless). */
+    var horizonStrength = 0f
         private set
 
     /**
@@ -88,9 +96,16 @@ class AngleController {
     }
 
     /**
-     * HORIZON mode: linearly blend self-leveling (center) into acro rates (edge).
-     *   s = max(|roll|, |pitch|);  out = (1-s)*angle + s*acro.
-     * Yaw always stays acro.
+     * HORIZON mode (published BF pid.c:542-561 calcHorizonLevelStrength):
+     *
+     *   strength = max((HORIZON_LIMIT_DEG - |inclination|)/LIMIT, 0)
+     *            * max(1 - |stick|, ignore) * gain
+     *
+     * The leveling weight therefore fades with BOTH the current bank angle AND the
+     * stick deflection, then passes through a rise-limited PT1 (smooth on the way
+     * up, immediate on the way down). out = strength*angle + (1-strength)*acro.
+     * Center stick / level attitude -> full self-level; full stick / steep bank ->
+     * full acro. Yaw always stays acro.
      *
      * @return [pitchNoseDownDps, rollRightDps, yawRightDps]
      */
@@ -98,9 +113,31 @@ class AngleController {
         val angleOut = angleRates(ch, attitude, dt, cfg)
         val acroPitch = Rates.actual(ch.pitch, cfg.pitch.center, cfg.pitch.max, cfg.pitch.expo)
         val acroRoll = Rates.actual(ch.roll, cfg.roll.center, cfg.roll.max, cfg.roll.expo)
-        val s = max(abs(ch.roll), abs(ch.pitch)).coerceIn(0f, 1f)
-        val pitch = (1f - s) * angleOut[0] + s * acroPitch
-        val roll = (1f - s) * angleOut[1] + s * acroRoll
+
+        // Current inclination = max(|roll|,|pitch|) deg (euler, same YXZ as rebaseline).
+        val e = Vector3f()
+        attitude.getEulerAnglesYXZ(e)
+        val rollDeg = (-e.z * 180.0 / PI).toFloat()
+        val pitchDeg = (-e.x * 180.0 / PI).toFloat()
+        val inclination = max(abs(rollDeg), abs(pitchDeg))
+
+        val limit = Defaults.HORIZON_LIMIT_DEG
+        val angleFade = max((limit - inclination) / limit, 0f)
+        val stick = max(abs(ch.roll), abs(ch.pitch)).coerceIn(0f, 1f)
+        val stickFade = max(1f - stick, 0f)
+        val raw = (angleFade * stickFade).coerceIn(0f, 1f)
+
+        // Rise-limited PT1: smooth the strength up, but drop immediately when it falls.
+        val tau = Defaults.HORIZON_SMOOTH_TAU_SEC.coerceAtLeast(1e-3f)
+        val h = dt.coerceIn(1e-4f, 0.1f)
+        val k = (h / (tau + h)).coerceIn(0f, 1f)
+        horizonSmoothed += k * (raw - horizonSmoothed)
+        if (!horizonSmoothed.isFinite()) horizonSmoothed = 0f
+        val strength = min(raw, horizonSmoothed).coerceIn(0f, 1f)
+        horizonStrength = strength
+
+        val pitch = strength * angleOut[0] + (1f - strength) * acroPitch
+        val roll = strength * angleOut[1] + (1f - strength) * acroRoll
         return floatArrayOf(pitch, roll, angleOut[2]) // yaw always acro
     }
 }

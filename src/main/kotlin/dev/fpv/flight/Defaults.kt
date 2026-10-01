@@ -61,9 +61,25 @@ object Defaults {
     const val DRAG_K = 0.015f
 
     // ---- Self-leveling (engineering starting values) ----
-    const val ANGLE_MAX_DEG = 50f
+    /** Published BF pid.c:150 angle_limit default = 60 deg. */
+    const val ANGLE_MAX_DEG = 60f
     const val ANGLE_P = 4.0f
     const val ANGLE_D = 0.0f
+
+    // ---- Horizon mode (published BF pid.c:542-561 calcHorizonLevelStrength) ----
+    /** Above this bank/deck angle the horizon self-leveling strength hits 0 (deg). */
+    const val HORIZON_LIMIT_DEG = 135f
+    /** PT1 rise time-constant for the leveling strength (~BF horizonDelayMs 500ms). */
+    const val HORIZON_SMOOTH_TAU_SEC = 0.5f
+
+    /**
+     * Airmode: minimum mixer authority fraction retained at low collective so
+     * attitude control persists the instant the craft leaves the ground. 0 = the
+     * fixed authority already used (no change); raise to bias low-throttle control.
+     */
+    const val AIRMODE_LOW_THROTTLE_AUTHORITY = 0.0f
+    /** Below this normalized collective the airmode authority floor applies. */
+    const val AIRMODE_ENGAGE_THROTTLE = 0.2f
 
     /** Reversible-3D throttle center deadband (normalized units). */
     const val THREE_D_THROTTLE_DEADBAND = 0.05f
