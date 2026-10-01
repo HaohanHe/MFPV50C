@@ -113,6 +113,9 @@ data class GateDef(
             else -> Math.abs(alongRight) <= halfW() && Math.abs(alongUp) <= halfH()
         }
         if (!insideOpening) return null
+        // Direction-aware: only a forward crossing (along the gate normal) counts, matching
+        // the headless-tested GateGeo.intersect (E2E-004).
+        if ((b.x - a.x) * n.x + (b.y - a.y) * n.y + (b.z - a.z) * n.z <= 0.0) return null
         return p
     }
 

@@ -1544,6 +1544,31 @@ public class FlightControlCheck {
       check("live gap +0.2 behind", Math.abs(gap-0.2)<1e-6, ""+gap);
     }
 
+    // ---------- 44. End-to-end heat: multi-gate loop, boost, reverse rejected ----------
+    System.out.println("\n[44] E2E heat: order gates + boost + reverse rejected");
+    {
+      long[] clk = {0L};
+      // gate0 z=0 start, gate1 z=10 boost, loop back to gate0.
+      var gg0 = new dev.fpv.race.CoreGate(0,0,0, 0,0,1, 1.0,1.0, false, false);
+      var gg1 = new dev.fpv.race.CoreGate(0,0,10, 0,0,1, 1.0,1.0, false, true);
+      var heat = new dev.fpv.race.RaceTimingCore(java.util.List.of(gg0,gg1), 2, 1_000_000_000_000L, 1_000L, 30_000_000_000L, 800_000_000L, true, () -> clk[0]);
+      heat.arm();
+      // start crossing gate0 (legit, no staging)
+      for (double z=-2; z<=12; z+=0.31) { clk[0]+=30_000_000L; heat.step(0,0,z); }
+      check("clock started on gate0", heat.getClockStarted(), "");
+      check("boost armed after gate1", heat.boostActive(), "");
+      var ev = heat.drainEvents();
+      check("BOOST event emitted once", ev.stream().filter(e->e==dev.fpv.race.CoreEvent.BOOST).count()==1L, ev.toString());
+      // return through gate0 -> lap1, then gate1, then gate0 -> lap2 = finish
+      for (double z=12; z>=-2; z-=0.31) { clk[0]+=30_000_000L; heat.step(0,0,z); }
+      for (double z=-2; z<=12; z+=0.31) { clk[0]+=30_000_000L; heat.step(0,0,z); }
+      for (double z=12; z>=-2; z-=0.31) { clk[0]+=30_000_000L; heat.step(0,0,z); }
+      System.out.printf("    laps=%d validLaps=%d splits=%d finished=%b avg3=%d%n",
+        heat.getLapsCompleted(), heat.getValidLapsNs().size(), heat.getSplitsNs().size(), heat.getFinished(), heat.avgBest3Ns());
+      check("2 laps valid", heat.getValidLapsNs().size()==2, ""+heat.getValidLapsNs().size());
+      check("heat finished", heat.getFinished(), "");
+    }
+
     System.out.println("\n========================================");
     System.out.println(failures == 0 ? "ALL TESTS PASS" : ("FAILURES: " + failures));
     System.exit(failures == 0 ? 0 : 1);
