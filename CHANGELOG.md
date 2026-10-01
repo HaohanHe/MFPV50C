@@ -6,6 +6,25 @@ Semantic Versioning; `main` is the development branch and `stable` points at the
 latest fully verified (zero-warning build + all verification scripts PASS)
 revision. No formal GitHub Release is published until real-hardware acceptance.
 
+## [Unreleased] — fix disarmed mouse fight + coordinated-turn tremor
+
+### Fixed
+- **Disarmed/idle camera fought the mouse (forced recenter + tremor)**: on a remote
+  server `LocalPlayerMixin` mapped `flight.attitude` onto the player look every tick
+  even while disarmed (`flight.ready=false`); the disengaged attitude is level/south,
+  so moving the mouse got pulled back and fought it. Added a `flight.ready` gate so
+  the look is rewritten only while actually flying.
+- **Coordinated-turn used yaw RATE instead of roll ANGLE**: `LocalPlayerMixin` passed
+  `bodyRates[2]` (yaw angular velocity, noisy) where the bank angle was required,
+  jittering the baked turn bias. Roll is now extracted from the attitude up vector
+  (`atan2(up.x, up.y)`), which is smooth.
+
+### Added
+- **`headless/run_headless.ps1`** Windows counterpart to run the headless verification.
+- Headless section [6]: frame-rate dt robustness — zero-stick hover at 60 fps
+  (dt .0166) and under variable/hitched dt (up to .033) stays upright with no NaN,
+  confirming the plant is stable at real render rates without fixed sub-stepping.
+
 ## [Unreleased] — REAL physics calibration + headless flight-controller tests
 
 ### Fixed

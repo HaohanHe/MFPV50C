@@ -43,15 +43,21 @@ class LocalPlayerMixin {
             if (!sc.compatEnabled) return@runCatching
             // Only the remote-compat path; single-player runs full translational physics.
             if (mc.isLocalServer) return@runCatching
+            // Map attitude to look only while actually flying; disarmed/idle must never
+            // fight the mouse (no forced recentering).
+            if (!FpvClient.flight.ready) return@runCatching
 
             val logic = ServerCompatLogic(sc)
             logic.tick()
 
             // nose = attitude * (0,0,-1); map to vanilla look.
-            val nose = Vector3f(0f, 0f, -1f).rotate(FpvClient.flight.attitude)
+            val attitude = FpvClient.flight.attitude
+            val nose = Vector3f(0f, 0f, -1f).rotate(attitude)
             val yp = logic.noseToYawPitch(nose.x(), nose.y(), nose.z())
-            // Roll (body z rotation) -> coordinated-turn bias baked into the look.
-            val rollDeg = FpvClient.flight.bodyRates[2]
+            // Roll ATTITUDE (bank angle, not yaw rate) -> coordinated-turn bias.
+            val up = Vector3f(0f, 1f, 0f).rotate(attitude)
+            val rollDeg = Math.toDegrees(
+                kotlin.math.atan2(up.x().toDouble(), up.y().toDouble())).toFloat()
             val turn = logic.coordinatedTurn(rollDeg)
             val targetYaw = yp[0] + turn[0]
             val targetPitch = (yp[1] + turn[1]).coerceIn(-90f, 90f)

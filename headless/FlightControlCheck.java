@@ -108,6 +108,26 @@ public class FlightControlCheck {
     return new float[]{ mov.x - base.x, mov.y - base.y, mov.z - base.z };
   }
 
+  /** Zero-stick hover driven by a cycled per-step dt sequence; {minUp, nan}.
+   *  Tests robustness at real render frame rates (60 fps) and under frame hitches. */
+  static double[] hoverWithDts(double[] dts, double dur) {
+    FpvConfig cfg = new FpvConfig();
+    FlightController fc = new FlightController(cfg);
+    fc.engage(0f, 0f);
+    float hover = cfg.activeAirframe().effectiveHoverThrottle();
+    StickChannels c = sticks(); c.throttle = hover;
+    double minUp = 1, t = 0; boolean nan = false; int k = 0;
+    while (t < dur) {
+      double dt = dts[k % dts.length]; k++;
+      fc.step(c, (float) dt, hover);
+      t += dt;
+      Vector3f up = new Vector3f(0f, 1f, 0f).rotate(fc.getAttitude());
+      if (!Float.isFinite(up.x) || !Float.isFinite(up.y) || !Float.isFinite(up.z)) nan = true;
+      if (up.y < minUp) minUp = up.y;
+    }
+    return new double[]{minUp, nan ? 1 : 0};
+  }
+
   public static void main(String[] a) {
     System.out.println("=== REAL FlightController headless verification (dt=" + DT + "s) ===");
 
@@ -170,6 +190,15 @@ public class FlightControlCheck {
     check("drag anisotropic vert>fwd>side", sVert > sFwd && sFwd > sSide,
       String.format("%.3f > %.3f > %.3f", sVert, sFwd, sSide));
     check("glide drag material even at t=0", sSide > 1e-4, "side=" + String.format("%.4f", sSide));
+
+    // ---------- 6. frame-rate dt robustness (60 fps + variable, hover) ----------
+    System.out.println("\n[6] Frame-rate dt robustness (60fps + variable, zero-stick hover)");
+    double[] f60 = hoverWithDts(new double[]{0.0166}, 10.0);
+    double[] fvar = hoverWithDts(new double[]{0.010, 0.0166, 0.025, 0.008, 0.0166, 0.033}, 10.0);
+    System.out.printf("    60fps dt=.0166 : minUp=%.2f NaN=%s%n", f60[0], f60[1] == 1);
+    System.out.printf("    variable dt    : minUp=%.2f NaN=%s%n", fvar[0], fvar[1] == 1);
+    check("60fps hover stays upright", f60[0] > 0.8 && f60[1] == 0, "minUp=" + String.format("%.2f", f60[0]));
+    check("variable-dt hover stays upright", fvar[0] > 0.8 && fvar[1] == 0, "minUp=" + String.format("%.2f", fvar[0]));
 
     System.out.println("\n========================================");
     System.out.println(failures == 0 ? "ALL TESTS PASS" : ("FAILURES: " + failures));
