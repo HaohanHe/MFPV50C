@@ -1150,6 +1150,57 @@ public class FlightControlCheck {
       check("throttle mid -> 0.5", Math.abs(dev.fpv.replay.StickOverlay.INSTANCE.throttleFill(0f)-0.5f)<1e-6, "");
     }
 
+    // ---------- 33. P-C: FrameConsumer, ffmpeg template + injection guard, PNG sequence, camera JSON exchange ----------
+    System.out.println("\n[33] P-C: ffmpeg template/token + injection guard, PNG frames, camera JSON");
+    {
+      var fc = dev.fpv.replay.FfmpegCommand.INSTANCE;
+      String tpl = "-y -f rawvideo -pix_fmt rgb24 -s %WIDTH%x%HEIGHT% -r %FPS% -i - -an -c:v libx264 -pix_fmt %PIXELFMT% %FILENAME%";
+      var cmd = fc.build("ffmpeg", tpl, 1920, 1080, 30, "yuv420p", "replay_1.mp4");
+      System.out.println("    cmd="+String.join(" ", cmd));
+      check("template substitutes width/height", cmd.contains("1920x1080"), cmd.toString());
+      check("template substitutes fps", cmd.contains("30"), cmd.toString());
+      check("template substitutes pixfmt", cmd.contains("yuv420p"), cmd.toString());
+      check("filename is its own arg", cmd.get(cmd.size()-1).equals("replay_1.mp4"), "tail="+cmd.get(cmd.size()-1));
+
+      // injection guard: hostile filename with flags stays ONE argv element, never a standalone flag.
+      var evil = fc.build("ffmpeg", tpl, 1920, 1080, 30, "yuv420p", "re.mp4 -vb 1000k");
+      boolean standaloneFlag = evil.stream().anyMatch(tok -> tok.equals("-vb") || tok.equals("1000k"));
+      check("injection filename never becomes standalone flag args", !standaloneFlag, evil.toString());
+      check("sanitize strips path separators", fc.sanitizeFilename("../etc/passwd").equals("passwd"), fc.sanitizeFilename("../etc/passwd"));
+
+      // PNG consumer writes continuously numbered frames.
+      java.nio.file.Path pngDir;
+      try { pngDir = java.nio.file.Files.createTempDirectory("pngseq"); }
+      catch (java.io.IOException ex) { throw new RuntimeException(ex); }
+      var png = new dev.fpv.replay.PngFrameConsumer(pngDir);
+      byte[] rgb = new byte[4*4*3];
+      png.consume(rgb, 4, 4); png.consume(rgb, 4, 4); png.consume(rgb, 4, 4);
+      png.close();
+      String[] names = pngDir.toFile().list((d,n)->n.endsWith(".png"));
+      java.util.Arrays.sort(names);
+      check("PNG sequence 3 frames numbered", names.length==3 && names[0].equals("frame_000001.png") && names[2].equals("frame_000003.png"), java.util.Arrays.toString(names));
+
+      // camera JSON exchange: frames = fps * duration.
+      var recs = new java.util.ArrayList<dev.fpv.replay.ReplayFile.Rec>();
+      for (int i=0;i<60;i++){ var rr=new dev.fpv.replay.ReplayFile.Rec(); rr.setTSec(i*0.02); rr.setX(i); rr.setQw(1f); recs.add(rr); }
+      java.nio.file.Path tmp;
+      try { tmp = java.nio.file.Files.createTempDirectory("cpath"); }
+      catch (java.io.IOException ex) { throw new RuntimeException(ex); }
+      var fpr = tmp.resolve("r.fpr");
+      dev.fpv.replay.ReplayFile.Companion.write(fpr, 50f, "t", recs, java.util.List.of());
+      var f = dev.fpv.replay.ReplayFile.Companion.read(fpr);
+      var cpath = tmp.resolve("camera.json");
+      int n = dev.fpv.replay.CameraPathExporter.INSTANCE.export(f, null, 30, cpath);
+      long durMs = (long)(f.getDurationSec()*1000);
+      System.out.println("    camera.json frames="+n+" durationMs="+durMs);
+      check("camera JSON frames = fps*duration", n == (int)Math.floor(f.getDurationSec()*30), "n="+n);
+      String json;
+      try { json = java.nio.file.Files.readString(cpath); }
+      catch (java.io.IOException ex) { throw new RuntimeException(ex); }
+      check("camera JSON has fps + frames", json.contains("\"fps\"") && json.contains("frames") && json.contains("\"t\""), json.substring(0, Math.min(80,json.length())));
+      check("camera JSON atomic (no .tmp leftover)", tmp.toFile().listFiles((d,x)->x.endsWith(".tmp")).length==0, "");
+    }
+
     System.out.println("\n========================================");
     System.out.println(failures == 0 ? "ALL TESTS PASS" : ("FAILURES: " + failures));
     System.exit(failures == 0 ? 0 : 1);

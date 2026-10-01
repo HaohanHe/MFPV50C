@@ -346,22 +346,10 @@ object CinematicExport {
             val outPath = FabricLoader.getInstance().gameDir.resolve("fpv-replays").resolve(outName)
             val dir = outPath.parent.toFile()
             if (!dir.exists()) dir.mkdirs()
-            // Command template researched from the public ReplayMod / ffmpeg docs.
-            val cmd = mutableListOf(
-                ffmpeg!!, "-y",
-                "-f", "rawvideo", "-pix_fmt", "rgb24",
-                "-s", "${canvasW}x${canvasH}",
-                "-r", "$fps",
-                "-i", "-",
-                "-an",
-                "-c:v", "libx264", "-preset", "medium", "-crf", "18",
-                "-pix_fmt", "yuv420p",
+            // User-customizable template (FfmpegCommand sanitizes the filename + substitutes tokens).
+            val cmd = FfmpegCommand.build(
+                ffmpeg!!, cfg.ffmpegTemplate, canvasW, canvasH, fps, "yuv420p", outName,
             )
-            if (ext == "mp4") {
-                cmd += "-movflags"
-                cmd += "+faststart"
-            }
-            cmd.add(outName) // run in the output dir (so relative name is safe).
             val pb = ProcessBuilder(cmd)
             pb.directory(dir)
             pb.redirectErrorStream(true)

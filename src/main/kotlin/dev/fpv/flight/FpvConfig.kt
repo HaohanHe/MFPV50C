@@ -281,6 +281,17 @@ class ExportConfig {
     /** Empty = look up "ffmpeg" on PATH; otherwise an absolute executable path. */
     var ffmpegPath: String = ""
 
+    /**
+     * User-customizable ffmpeg command template. Tokens are substituted:
+     * %WIDTH% %HEIGHT% %FPS% %PIXELFMT% %FILENAME%. Default keeps the proven
+     * rgb24->libx264/yuv420p CRF18 pipeline. The output filename is sanitized to a
+     * whitelist before substitution, so a weird replay name cannot inject flags.
+     */
+    var ffmpegTemplate: String = "-y -f rawvideo -pix_fmt rgb24 -s %WIDTH%x%HEIGHT% -r %FPS% -i - -an -c:v libx264 -preset medium -crf 18 -pix_fmt %PIXELFMT% %FILENAME%"
+
+    /** Draw the recorded RC joystick overlay in a corner of exported frames (default off). */
+    var rcOverlay: Boolean = false
+
     /** Chase camera follow distance, blocks. */
     var chaseDistance: Float = 2.5f
 }

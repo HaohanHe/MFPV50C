@@ -8,6 +8,25 @@ revision. No formal GitHub Release is published until real-hardware acceptance.
 
 ## [Unreleased] — OSD refactor: data-driven element registry
 
+### Added (P-B GUI: cinematic keyframe timeline editor)
+- **`replay/CinematicEditorScreen.kt`**: scrub rail with keyframe ticks (click to select / scrub),
+  "Set KF here" (upsert at cursor), Delete KF, cycle interpolator (CR/Cubic/Linear, live label),
+  nudge keyframe time ±0.1s, atomic Save to the sidecar, Done. Real-button on ReplayScreen
+  "Cameras...". ReplayManager upsert/delete/cycle/save helpers.
+
+### Added (P-C: export decoupling, ffmpeg template, camera exchange)
+- **`replay/FrameConsumer.kt`**: `FrameConsumer` interface decoupling "rendered a frame" from
+  encoding; `PngFrameConsumer` is the continuous-numbered PNG fallback.
+- **`replay/FfmpegCommand.kt`**: user-customizable ffmpeg template (`ExportConfig.ffmpegTemplate`,
+  tokens %WIDTH% %HEIGHT% %FPS% %PIXELFMT% %FILENAME%); output filename whitelisted to
+  `[A-Za-z0-9._-]` and passed as its own argv element, so a hostile name cannot inject flags.
+  Missing ffmpeg already falls back to PNG with a status message.
+- **`replay/CameraPathExporter.kt`**: dumps the per-frame camera pose (recorded or spline-sampled)
+  to JSON (`{fps, frames:[{t,x,y,z,qx,qy,qz,qw,fov}]}`) for Blender/AE import; atomic write.
+- Optional RC joystick overlay (`ExportConfig.rcOverlay`, default off).
+- headless [33]: template substitution + injection guard, PNG continuous numbering, camera JSON
+  frames = fps×duration.
+
 ### Added (P-B: cinematic keyframe camera track)
 - **Keyframe camera track** (`replay/CinematicTrack.kt`, clean-room): ordered `(tSec, pos, quat, interp)`
   keyframes persisted atomically to a `<rec>.cam.json` sidecar (versioned schema, shareable). Position
