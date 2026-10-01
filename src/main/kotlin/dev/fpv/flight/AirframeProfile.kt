@@ -45,8 +45,9 @@ class AirframeProfile {
     /**
      * Max static thrust per motor at full throttle, Newtons.
      * Consumed: total full-throttle force = motorCount * this * thrustLaw(1).
+     * Bare default = a typical 5in 4S motor (~12 N); built-in profiles override it.
      */
-    var maxThrustPerMotorN: Float = 35.0f
+    var maxThrustPerMotorN: Float = 12.0f
 
     /**
      * Thrust law: total per-motor thrust fraction =
@@ -238,6 +239,12 @@ class AirframeProfile {
      * hover command keeps headroom within [0,1].
      */
     var differentialAuthority: Float = Defaults.DIFFERENTIAL_AUTHORITY
+
+    /** Per-axis mixer differential authority (replaces the single value above;
+     *  roll/pitch are thrust-differential, yaw is reaction-torque differential). */
+    var rollAuthority: Float = Defaults.ROLL_DIFFERENTIAL_AUTHORITY
+    var pitchAuthority: Float = Defaults.PITCH_DIFFERENTIAL_AUTHORITY
+    var yawAuthority: Float = Defaults.YAW_DIFFERENTIAL_AUTHORITY
 
     /** Fallback proportional rate gain (1/deg/s of error) when the inner PID
      * loop is disabled. Consumed by RealDynamics only. */

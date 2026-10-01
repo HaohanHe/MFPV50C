@@ -47,6 +47,9 @@ class FlightController(val cfg: FpvConfig = FpvConfig()) {
     /** Real (P-D) rigid-body plant, used when cfg.physicsRealism == "REAL". */
     private val realDynamics = RealDynamics(cfg, pidLoop)
 
+    /** Persistent prop-wash model: its oscillation phase must accumulate across frames. */
+    private val propwash = PropwashModel()
+
     /**
      * Battery voltage derate 0..1 (vbat/vNominal), fed by the client each frame.
      * High throttle sags the pack -> lower rpm -> less thrust/reaction torque.
@@ -360,11 +363,10 @@ class FlightController(val cfg: FpvConfig = FpvConfig()) {
         // Condition-driven prop-wash (applies in BOTH physics modes): descending /
         // settled in the own downwash at low airspeed + high throttle -> 15-40 Hz
         // gyro shake + thrust drop; clean fast forward flight stays smooth.
-        val wash = PropwashModel(cfg.activeAirframe())
-        val washOut = wash.step(transVy, transHoriz, thr, dt)
+        val washOut = propwash.step(cfg.activeAirframe(), transVy, transHoriz, thr, dt)
         trackedRates[0] += washOut.x()
         trackedRates[1] += washOut.y()
-        propwashThrustScale = wash.thrustScale
+        propwashThrustScale = propwash.thrustScale
 
         // Body-frame post-multiply integration; axis vectors from BodyAxis.
         // Integrate the tracked (actual) rates, not the commanded ones. Guard

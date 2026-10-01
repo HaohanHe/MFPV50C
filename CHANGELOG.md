@@ -6,6 +6,33 @@ Semantic Versioning; `main` is the development branch and `stable` points at the
 latest fully verified (zero-warning build + all verification scripts PASS)
 revision. No formal GitHub Release is published until real-hardware acceptance.
 
+## [Unreleased] — REAL physics calibration + headless flight-controller tests
+
+### Fixed
+- **Prop-wash oscillation never animated**: `FlightController` re-created a fresh
+  `PropwashModel` every frame, resetting its oscillation phase, so the 15-40 Hz
+  sine degenerated to a constant offset (no visible shake). The model is now a
+  persistent field; `PropwashModel.step(airframe, ...)` takes the active airframe
+  per frame so profile switching still works.
+- **Bare `AirframeProfile` fallback thrust** was 35 N/motor (~3x real); corrected
+  to 12 N to match the Freestyle 5" reference.
+
+### Changed
+- **Per-axis mixer differential authority** replaces the single 0.22 value:
+  roll 0.25 / pitch 0.27 (thrust differential) and yaw 0.55 (reaction-torque
+  differential). Full stick now reaches ~670 dps roll/pitch and ~400 dps yaw
+  (yaw is reaction-torque limited, as on a real quad).
+- Reaction torque per motor calibrated 0.08 -> 0.15 N·m (5" torque/thrust ~0.012).
+
+### Added
+- **`headless/FlightControlCheck.java` + `run_headless.sh`** — reproducible
+  headless verification of the REAL pipeline actually shipped on main
+  (rates -> PID -> Quad-X mixer -> motor lag -> rigid body -> attitude, plus
+  prop-wash): three-axis step (rise time, overshoot, pitch/roll symmetry),
+  zero-stick rate-hold, descent-vs-clean prop-wash, and 30 s closed-loop
+  stability with NaN guards. (The earlier `PhysicsCheck` exercised a different,
+  unmerged rigid-body implementation and does not apply to main.)
+
 ## [Unreleased] — graphical radio calibration + P-B remote compatibility
 
 ### Added

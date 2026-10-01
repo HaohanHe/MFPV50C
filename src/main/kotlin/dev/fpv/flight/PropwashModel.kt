@@ -23,7 +23,7 @@ import org.joml.Vector3f
 import kotlin.math.PI
 import kotlin.math.sin
 
-class PropwashModel(val af: AirframeProfile) {
+class PropwashModel {
 
     private fun unit(x: Float) = x.coerceIn(0f, 1f)
 
@@ -44,7 +44,7 @@ class PropwashModel(val af: AirframeProfile) {
      * @param dt         seconds
      * @return gyro disturbance dps on [pitch, roll, yaw]
      */
-    fun step(vy: Float, horizSpeed: Float, throttle: Float, dt: Float): Vector3f {
+    fun step(af: AirframeProfile, vy: Float, horizSpeed: Float, throttle: Float, dt: Float): Vector3f {
         if (!af.propwashEnabled || dt <= 0f) {
             strength = 0f; thrustScale = 1f
             return Vector3f(0f, 0f, 0f)

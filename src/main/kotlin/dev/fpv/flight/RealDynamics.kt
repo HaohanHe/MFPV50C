@@ -92,16 +92,19 @@ class RealDynamics(
             }
         }
 
-        // 2. Quad-X mixer: motor command = collective + authority * differential.
-        val auth = af.differentialAuthority.coerceIn(0f, 0.6f)
+        // 2. Quad-X mixer: motor = collective + per-axis authority * differential.
+        //    Roll/pitch use thrust differential (small swing); yaw uses reaction
+        //    torque and needs a larger motor-fraction swing.
+        val pitchAuth = af.pitchAuthority.coerceIn(0f, 0.8f)
+        val rollAuth = af.rollAuthority.coerceIn(0f, 0.8f)
+        val yawAuth = af.yawAuthority.coerceIn(0f, 0.9f)
         val u = FloatArray(4)
         for (i in 0..3) {
             val row = MixerTables.QUAD_X[i]
-            var cmd = thr + auth * (
-                d[BodyAxis.PITCH.index] * row[MixerTables.PITCH] +
-                d[BodyAxis.ROLL.index] * row[MixerTables.ROLL] +
-                d[BodyAxis.YAW.index] * row[MixerTables.YAW]
-            )
+            val cmd = thr +
+                pitchAuth * d[BodyAxis.PITCH.index] * row[MixerTables.PITCH] +
+                rollAuth * d[BodyAxis.ROLL.index] * row[MixerTables.ROLL] +
+                yawAuth * d[BodyAxis.YAW.index] * row[MixerTables.YAW]
             u[i] = cmd.coerceIn(af.minThrottle, 1f)
         }
 

@@ -146,8 +146,9 @@ object Defaults {
     const val ARM_LENGTH_M = 0.105f
 
     /** Reaction torque per motor at full rpm, N·m (yaw authority). km·rpmMax^2.
-     *  Engineering starting value pending real-machine tuning. */
-    const val REACTION_TORQUE_PER_MOTOR_NM = 0.08f
+     *  For a 5" disk (~12 N full thrust) the torque/thrust ratio is ~0.012,
+     *  i.e. ~0.15 N·m per motor at full rpm. */
+    const val REACTION_TORQUE_PER_MOTOR_NM = 0.15f
 
     /** Normalised motor speed (rpm/rpmMax) at nominal voltage; 4S ~22-26k rpm. */
     const val RPM_MAX_PER_MOTOR = 24000f
@@ -156,6 +157,15 @@ object Defaults {
      *  Keeps the hover motor command within [0,1] under full differential. Tuned
      *  headless so a rate step has ~50-90ms rise with a single mild overshoot. */
     const val DIFFERENTIAL_AUTHORITY = 0.22f
+
+    /** Per-axis mixer differential authority (data-driven replacement for the
+     *  single DIFFERENTIAL_AUTHORITY). Roll/pitch are thrust-differential; yaw is
+     *  reaction-torque differential and needs a larger motor-fraction swing.
+     *  Tuned headless for ~60-100ms rise, one mild overshoot, full-stick ~670 dps
+     *  (roll/pitch) and ~400 dps (yaw). */
+    const val ROLL_DIFFERENTIAL_AUTHORITY = 0.25f
+    const val PITCH_DIFFERENTIAL_AUTHORITY = 0.27f
+    const val YAW_DIFFERENTIAL_AUTHORITY = 0.55f
 
     /** Rigid-body viscous rotational damping (N·m·s), engineering starting values. */
     const val ROTDAMP_XX = 0.070f
