@@ -30,6 +30,10 @@ public class FlightControlCheck {
 
   static final double DT = 0.005; // fixed 200 Hz step
 
+  // I-11: clean-flight jitter (dps^2) below this makes the wash ratio numerically
+  // meaningless; report N/A rather than divide by a near-zero denominator.
+  static final double WASH_RATIO_MIN_CLEAN_DPS2 = 1.0;
+
   /** Neutral channel frame (throttle 0); @JvmField fields are set by callers. */
   static StickChannels sticks() {
     return new StickChannels(0f, 0f, 0f, 0f, new float[0], true, "headless",
@@ -248,8 +252,20 @@ public class FlightControlCheck {
     System.out.printf("    descent jitter=%.2f  clean jitter=%.2f dps^2%n", jDesc, jClean);
     check("descent visibly shakes (jitter>=20 dps^2)", jDesc >= 20.0,
       "jDesc=" + String.format("%.1f", jDesc));
+    // I-11: when clean-flight jitter is ~zero the ratio is dominated by numerical
+    // noise, so report N/A instead of a huge/inf blow-up; never divide by <=0.
+    String ratioStr;
+    if (jClean < WASH_RATIO_MIN_CLEAN_DPS2 || !Double.isFinite(jClean) || jClean <= 0.0) {
+      ratioStr = "N/A(clean~" + String.format("%.2f", jClean) + ")";
+    } else {
+      double washRatio = jDesc / jClean;
+      ratioStr = Double.isFinite(washRatio) ? String.format("%.1fx", washRatio) : "non-finite";
+    }
     check("clean flight smooth, descent dominates (>3x)", jClean < 5.0 && jDesc > jClean * 3.0,
-      "ratio=" + String.format("%.1fx", jDesc / Math.max(jClean, 1e-6)));
+      "ratio=" + ratioStr);
+    check("wash ratio evidence finite (no inf/NaN)",
+      !ratioStr.contains("Infinity") && !ratioStr.contains("NaN") && Double.isFinite(jClean),
+      ratioStr);
 
     // ---------- 4. long closed loop ----------
     System.out.println("\n[4] Long closed-loop stability (30s)");
@@ -619,6 +635,117 @@ public class FlightControlCheck {
       System.out.printf("    after disarm: final=%.3f deg%n", pprev);
       check("tilt ramps back to 0 on disarm", pprev < 0.5, "final="+String.format("%.3f", pprev));
       check("disarm ramp monotonic down", monoDown, "");
+    }
+
+    // ---------- 18. TrackStore atomic write (I-6) ----------
+    System.out.println("\n[18] TrackStore atomic write (no half-written file, round-trips)");
+    {
+      try {
+      java.nio.file.Path dir = java.nio.file.Files.createTempDirectory("fpvtrack");
+      java.nio.file.Path tPath = dir.resolve("test.json");
+      dev.fpv.race.TrackDoc doc = new dev.fpv.race.TrackDoc();
+      doc.setName("Test Course");
+      doc.setDefaultWidth(2.5f);
+      dev.fpv.race.TrackStore.saveTo(tPath, doc);
+      try (java.util.stream.Stream<java.nio.file.Path> s = java.nio.file.Files.list(dir)) {
+        long tmp = s.filter(f -> f.getFileName().toString().contains(".tmp-")).count();
+        check("no leftover atomic temp file", tmp == 0, "tmp=" + tmp);
+      }
+      String raw = java.nio.file.Files.readString(tPath);
+      check("target file exists & non-empty", raw.length() > 10, "bytes=" + raw.length());
+      com.google.gson.Gson g = new com.google.gson.Gson();
+      dev.fpv.race.TrackDoc back = g.fromJson(raw, dev.fpv.race.TrackDoc.class);
+      check("round-trip name preserved", "Test Course".equals(back.getName()), back.getName());
+      check("round-trip width preserved", Math.abs(back.getDefaultWidth() - 2.5f) < 1e-5, "w=" + back.getDefaultWidth());
+      // Overwrite: previous file must be atomically replaced, never truncated.
+      dev.fpv.race.TrackDoc doc2 = new dev.fpv.race.TrackDoc();
+      doc2.setName("Test Course"); doc2.setDefaultWidth(3.5f);
+      dev.fpv.race.TrackStore.saveTo(tPath, doc2);
+      String raw2 = java.nio.file.Files.readString(tPath);
+      dev.fpv.race.TrackDoc back2 = g.fromJson(raw2, dev.fpv.race.TrackDoc.class);
+      check("overwrite round-trips to new width", Math.abs(back2.getDefaultWidth() - 3.5f) < 1e-5, "w=" + back2.getDefaultWidth());
+      } catch (java.io.IOException e) {
+        check("TrackStore IO complete", false, e.toString());
+      }
+    }
+
+    // ---------- 19. Monitor gimbal labels follow hand mode (I-7) ----------
+    System.out.println("\n[19] Monitor gimbal labels follow hand mode (reverse lookup)");
+    {
+      dev.fpv.input.StickSlot RH = dev.fpv.input.StickSlot.RH;
+      String m2rh = dev.fpv.input.HandLayout.slotLabel(2, RH);
+      String m1rh = dev.fpv.input.HandLayout.slotLabel(1, RH);
+      System.out.printf("    Mode2 RH=%s   Mode1 RH=%s%n", m2rh, m1rh);
+      check("Mode2 RH = Roll", "Roll".equals(m2rh), m2rh);
+      check("Mode1 RH = Yaw", "Yaw".equals(m1rh), m1rh);
+      check("same physical slot differs across modes", !m2rh.equals(m1rh), m2rh + " != " + m1rh);
+      check("Mode2 LH=Yaw LV=Throttle RV=Pitch",
+        "Yaw".equals(dev.fpv.input.HandLayout.slotLabel(2, dev.fpv.input.StickSlot.LH))
+        && "Throttle".equals(dev.fpv.input.HandLayout.slotLabel(2, dev.fpv.input.StickSlot.LV))
+        && "Pitch".equals(dev.fpv.input.HandLayout.slotLabel(2, dev.fpv.input.StickSlot.RV)), "");
+      check("Mode1 LH=Roll LV=Pitch RV=Throttle",
+        "Roll".equals(dev.fpv.input.HandLayout.slotLabel(1, dev.fpv.input.StickSlot.LH))
+        && "Pitch".equals(dev.fpv.input.HandLayout.slotLabel(1, dev.fpv.input.StickSlot.LV))
+        && "Throttle".equals(dev.fpv.input.HandLayout.slotLabel(1, dev.fpv.input.StickSlot.RV)), "");
+    }
+
+    // ---------- 20. yaw physical ceiling (I-9) ----------
+    System.out.println("\n[20] yaw physical ceiling (analytic vs real plant; below nominal max)");
+    {
+      FpvConfig cfg = new FpvConfig();
+      double nominal = cfg.getYaw().getMax();
+      double predicted = cfg.activeAirframe().yawPhysicalMaxDps(0.5f, 1f);
+      double[] yawStep = axisStep(2); // yaw full stick at thr=0.5 -> {t63,peak,end,setpoint}
+      double measured = Math.abs(yawStep[2]);
+      System.out.printf("    analytic=%.1f dps  measured end=%.1f dps  nominal max=%.0f dps%n",
+        predicted, measured, nominal);
+      check("analytic ceiling finite & >0", predicted > 50.0 && Double.isFinite(predicted), "pred=" + predicted);
+      check("measured full-stick yaw ~ analytic (within 20%)",
+        Math.abs(measured - predicted) <= 0.20 * predicted,
+        "measured=" + String.format("%.0f", measured) + " pred=" + String.format("%.0f", predicted));
+      check("physical ceiling below nominal max (the gap we annotate)",
+        predicted < 0.75 * nominal,
+        "pred=" + String.format("%.0f", predicted) + " nom=" + String.format("%.0f", nominal));
+    }
+
+    // ---------- 21. OSD horizon direction (I-10) ----------
+    System.out.println("\n[21] OSD horizon direction (roll right -> left-high; nose-down -> rises)");
+    {
+      // --- right roll: drive the REAL FC with roll=+1 ---
+      {
+        FpvConfig cfg = new FpvConfig();
+        FlightController fc = new FlightController(cfg);
+        fc.engage(0f, 0f);
+        float hover = cfg.activeAirframe().effectiveHoverThrottle();
+        StickChannels warm = sticks(); warm.throttle = hover;
+        for (int i = 0; i < (int)(0.3 / DT); i++) fc.step(warm, (float) DT, hover);
+        StickChannels c = sticks(); c.roll = 1f; c.throttle = hover;
+        for (int i = 0; i < (int)(0.6 / DT); i++) fc.step(c, (float) DT, hover);
+        Quaternionf att = new Quaternionf(fc.getAttitude());
+        float rollDeg = (float) Math.toDegrees(OsdLayoutMath.rollRad(att));
+        float[] e = OsdLayoutMath.horizonEndpointScreenDy(att, 30f);
+        System.out.printf("    roll-right: rollRad=%+.1f deg  leftY=%.1f rightY=%.1f%n", rollDeg, e[0], e[1]);
+        check("right roll yields positive rollRad (banked-right convention)", rollDeg > 5.0, "roll="+String.format("%+.1f", rollDeg));
+        check("right roll -> horizon left-high right-low (leftY<rightY)", e[0] < e[1],
+          "leftY=" + String.format("%.1f", e[0]) + " rightY=" + String.format("%.1f", e[1]));
+      }
+      // --- nose down: drive the REAL FC with pitch=+1 ---
+      {
+        FpvConfig cfg = new FpvConfig();
+        FlightController fc = new FlightController(cfg);
+        fc.engage(0f, 0f);
+        float hover = cfg.activeAirframe().effectiveHoverThrottle();
+        StickChannels warm = sticks(); warm.throttle = hover;
+        for (int i = 0; i < (int)(0.3 / DT); i++) fc.step(warm, (float) DT, hover);
+        StickChannels c = sticks(); c.pitch = -1f; c.throttle = hover; // -1 = nose down here
+        for (int i = 0; i < (int)(0.6 / DT); i++) fc.step(c, (float) DT, hover);
+        Quaternionf att = new Quaternionf(fc.getAttitude());
+        float pDeg = OsdLayoutMath.pitchDeg(att);
+        int dy = OsdLayoutMath.groupDyPx(att);
+        System.out.printf("    nose-down: pitch=%+.1f deg  groupDy=%d px (negative = rises)%n", pDeg, dy);
+        check("nose-down gives positive pitchDeg", pDeg > 2.0, "p=" + String.format("%.1f", pDeg));
+        check("nose-down moves horizon UP on screen (groupDy<0)", dy < 0, "dy=" + dy);
+      }
     }
 
     System.out.println("\n========================================");

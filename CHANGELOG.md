@@ -6,6 +6,41 @@ Semantic Versioning; `main` is the development branch and `stable` points at the
 latest fully verified (zero-warning build + all verification scripts PASS)
 revision. No formal GitHub Release is published until real-hardware acceptance.
 
+## [Unreleased] — P2 cloud-verifiable fixes (track atomicity / monitor hand-mode / yaw ceiling / OSD horizon)
+
+### Fixed
+- **I-6 Track save atomicity** (`race/TrackStore.kt`): `save()` now serializes through a new
+  `saveTo(path, doc)` that reuses `flight/AtomicFiles` (sibling temp file + atomic move/replace)
+  instead of a direct `Files.writeString`. A crash mid-save can no longer leave a half-written
+  track; a failed write leaves the previous file intact. Headless [18] checks no temp-file
+  residue, non-empty target, and round-trip field preservation across an overwrite.
+- **I-7 Monitor gimbal labels follow the hand mode** (`input/HandLayout.kt` reverse lookup;
+  `client/gui/MonitorScreen.kt`): the monitor no longer hard-codes Mode-2 channel names. It now
+  resolves each physical stick slot to its logical channel via `HandLayout.slotLabel(handMode, slot)`,
+  so switching Mode 1↔2 relabels LH/LV/RH/RV correctly. Headless [19] verifies Mode-1 vs Mode-2
+  names for the same physical slot.
+- **I-9 yaw physical ceiling annotation** (`flight/AirframeProfile.yawPhysicalMaxDps()`,
+  `FpvConfig.yawPhysicalMaxDps()`): the nominal yaw rate max (default 670 dps) exceeds what the
+  Quad-X reaction-torque mixer can actually deliver. The new data-driven formula balances the
+  saturated yaw reaction torque against viscous yaw damping (incl. motor [minThrottle,1] clamp) and
+  reports ~406 dps at thr=0.5; the airframe config page prints "YAW full-stick physical ~N dps".
+  No hard speed limit; roll/pitch feel unchanged. Headless [20] matches the analytic value to the
+  real full-stick yaw step to within tolerance (406 vs 406).
+- **I-10 OSD horizon direction pinned** (`flight/OsdLayoutMath.rollRad`/`groupDyPx`/new
+  `horizonEndpointScreenDy`; `client/osd/FpvOsd.kt` now derives roll+shift from the shared math):
+  the instrument overlays the horizon using the same JOML Matrix3x2f transform it draws with.
+  Headless [21] drives the real plant and asserts right roll -> left endpoint higher than the right
+  (leftY=-27.2 < rightY=+27.2 at 65 deg) and nose-down -> the horizon group rises on screen
+  (groupDy=-179 px). NOTE: an intermediate cloud edit attempted to negate `rollRad`; the empirical
+  FC-driven check showed that inverted the overlay, so the sign was kept at `atan2(bodyUp.x, bodyUp.y)`.
+- **I-11 wash-ratio headless artifact** (`headless/FlightControlCheck.java` [3]): when clean-flight
+  jitter is below 1 dps^2 the ratio is now reported as N/A instead of dividing by a near-zero
+  denominator (which produced a huge/inf blow-up); added an explicit finite (no inf/NaN) assertion.
+
+### Notes
+- **I-12 (SE / server-compat landing point)**: no code change this pass; the real-world Monitor
+  landing-point behaviour still needs on-hardware verification.
+
 ## [Unreleased] — E2E audit fixes: BF CLI import + rate-type selector
 
 ### Added
