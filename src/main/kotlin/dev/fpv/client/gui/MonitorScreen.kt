@@ -67,12 +67,9 @@ class MonitorScreen(private val parent: Screen?) :
         return a?.name ?: ""
     }
 
-    private fun gimbalName(slot: dev.fpv.input.StickSlot): String = when (slot) {
-        dev.fpv.input.StickSlot.LH -> "Yaw"
-        dev.fpv.input.StickSlot.LV -> "Throttle"
-        dev.fpv.input.StickSlot.RH -> "Roll"
-        dev.fpv.input.StickSlot.RV -> "Pitch"
-    }
+    /** Logical channel a physical gimbal slot drives under the CURRENT hand mode. */
+    private fun gimbalName(slot: dev.fpv.input.StickSlot): String =
+        dev.fpv.input.HandLayout.slotLabel(cfg.handMode, slot)
 
     /**
      * Normalized (-1..1) value of raw axis [idx] through whatever calibration

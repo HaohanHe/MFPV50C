@@ -22,6 +22,36 @@ object HandLayout {
     fun slot(mode: Int, channel: Int): StickSlot =
         TABLE[(mode - 1).coerceIn(0, TABLE.lastIndex)][channel]
 
+    /**
+     * Reverse lookup: which logical channel (StickChannels.ROLL/PITCH/YAW/
+     * THROTTLE) currently lives on physical [slot] under hand [mode], or -1 if
+     * the slot has no logical channel. The channel monitor uses this so its
+     * gimbal labels follow the active hand mode instead of being hard-coded to
+     * Mode 2.
+     */
+    @JvmStatic
+    fun channelOn(mode: Int, slot: StickSlot): Int {
+        val row = TABLE[(mode - 1).coerceIn(0, TABLE.lastIndex)]
+        for (ch in StickChannels.ROLL..StickChannels.THROTTLE) {
+            if (row[ch] == slot) return ch
+        }
+        return -1
+    }
+
+    /**
+     * Display name of the logical channel on physical [slot] under hand [mode],
+     * or "?" if unbound. Callers that show gimbal labels must go through this so
+     * the label tracks the configured hand mode.
+     */
+    @JvmStatic
+    fun slotLabel(mode: Int, slot: StickSlot): String = when (channelOn(mode, slot)) {
+        StickChannels.ROLL -> "Roll"
+        StickChannels.PITCH -> "Pitch"
+        StickChannels.YAW -> "Yaw"
+        StickChannels.THROTTLE -> "Throttle"
+        else -> "?"
+    }
+
     // Index order per row: ROLL=0, PITCH=1, YAW=2, THROTTLE=3.
     private val TABLE: Array<Array<StickSlot>> = arrayOf(
         // Mode 1: left = roll(H)/pitch(V), right = yaw(H)/throttle(V)
