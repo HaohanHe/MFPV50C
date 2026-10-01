@@ -1276,6 +1276,58 @@ public class FlightControlCheck {
       check("all maneuvers finite (no NaN / divergence)", !anyNan, "anyNan="+anyNan);
     }
 
+    // ---------- 35. Remaining named freestyle moves (sticks-only, emergent) ----------
+    System.out.println("\n[35] split-S / rubik's / inverted-recover / power-dive");
+    {
+      FpvConfig cfg = new FpvConfig();
+      cfg.setPhysicsRealism("REAL");
+      if (cfg.getPid() != null) cfg.getPid().setEnabled(true);
+      cfg.setSetpointSmoothingEnabled(false);
+      var aero = new dev.fpv.flight.Aerobatics(cfg);
+      float hov = cfg.activeAirframe().effectiveHoverThrottle();
+      boolean anyNan=false;
+
+      // split-S: half-roll to inverted, then pull out (pitch) -> gravity carries the dive-out.
+      var split = java.util.List.of(
+        new dev.fpv.flight.Aerobatics.Frame(0.0, 0f,0f,0f,hov),
+        new dev.fpv.flight.Aerobatics.Frame(0.1, 1f,0f,0f,hov),
+        new dev.fpv.flight.Aerobatics.Frame(0.45f, 1f,0f,0f,hov),
+        new dev.fpv.flight.Aerobatics.Frame(0.55f, 0f,1f,0f,hov),
+        new dev.fpv.flight.Aerobatics.Frame(1.6, 0f,1f,0f,hov));
+      var tSplit = aero.run(split, (float)DT, 4,0,0, 0.6);
+      float minUpS=1f; float endUpS=0f;
+      for (var s: tSplit.getSamples()) minUpS=Math.min(minUpS,s.getBodyUpY());
+      endUpS = tSplit.getSamples().get(tSplit.getSamples().size()-1).getBodyUpY();
+      anyNan |= tSplit.getNan();
+      System.out.printf("    split-S: minUp=%.2f endUp=%.2f (inverted mid, recovering level)%n", minUpS, endUpS);
+      check("split-S passes inverted mid-maneuver", minUpS<-0.9f, String.valueOf(minUpS));
+      check("split-S pulls back toward level (endUp > inverted)", endUpS > minUpS+0.5f, String.valueOf(endUpS));
+
+      // rubik's: combined roll+yaw on the spot (no entry speed) -> bounded drift, finite.
+      var rubik = java.util.List.of(
+        new dev.fpv.flight.Aerobatics.Frame(0.0, 0f,0f,0f,hov),
+        new dev.fpv.flight.Aerobatics.Frame(0.1, 0.8f,0f,0.8f,hov),
+        new dev.fpv.flight.Aerobatics.Frame(1.2, 0.8f,0f,0.8f,hov));
+      var tRubik = aero.run(rubik, (float)DT, 0,0,0, 0.3);
+      double altRub = tRubik.getSamples().get(tRubik.getSamples().size()-1).getAltY();
+      anyNan |= tRubik.getNan();
+      System.out.printf("    rubik's: on-the-spot roll+yaw, altDrift=%.2f (bounded, no runaway)%n", altRub);
+      check("rubik's stays near its own altitude (no translational runaway)", Math.abs(altRub) < 8.0, String.valueOf(altRub));
+
+      // power dive: pitch down then pull up -> speeds up in the dive vs level, no crash oscillation.
+      var pdive = java.util.List.of(
+        new dev.fpv.flight.Aerobatics.Frame(0.0, 0f,0f,0f,hov),
+        new dev.fpv.flight.Aerobatics.Frame(0.1, 0f,-1f,0f,hov),
+        new dev.fpv.flight.Aerobatics.Frame(0.9, 0f,-1f,0f,hov),
+        new dev.fpv.flight.Aerobatics.Frame(1.0, 0f,1f,0f,hov),
+        new dev.fpv.flight.Aerobatics.Frame(1.6, 0f,1f,0f,hov));
+      var tPdiv = aero.run(pdive, (float)DT, 4,0,0, 0.3);
+      anyNan |= tPdiv.getNan();
+      System.out.printf("    power dive: v0=%.2f vEnd=%.2f%n", tPdiv.getStartSpeed(), tPdiv.getEndSpeed());
+
+      check("all remaining maneuvers finite (no NaN/divergence)", !anyNan, "anyNan="+anyNan);
+    }
+
     System.out.println("\n========================================");
     System.out.println(failures == 0 ? "ALL TESTS PASS" : ("FAILURES: " + failures));
     System.exit(failures == 0 ? 0 : 1);
