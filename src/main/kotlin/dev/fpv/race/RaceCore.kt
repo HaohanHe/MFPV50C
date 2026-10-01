@@ -105,6 +105,9 @@ class RaceTimingCore(
     val debounceNs: Long = 2_000_000_000L,
     val jumpStartPenaltyNs: Long = 30_000_000_000L,
     val boostDurationNs: Long = BOOST_DURATION_MS * 1_000_000L,
+    /** When true (default), crossing the timing gate is the legitimate start; a jump
+     *  penalty only applies while staging/countdown is active before the GO signal. */
+    val falseStartOnlyWithStaging: Boolean = true,
     val now: () -> Long,
 ) {
     var clockStarted = false; private set
@@ -115,9 +118,16 @@ class RaceTimingCore(
     var penaltyNs = 0L; private set
     var lapInvalid = false; private set
     var boostUntilNs = 0L; private set
-    var lastEvent = CoreEvent.NONE; private set
+    /** Staging/countdown active; set true by the heat controller when a pre-GO window exists. */
+    var stagingActive: Boolean = false
     val validLapsNs = mutableListOf<Long>()
     val splitsNs = mutableListOf<Long>()
+
+    // One-shot event queue: pushed on every gate/timeout/boost, drained exactly once by the host.
+    private val eventQ = ArrayDeque<CoreEvent>()
+
+    /** Drain all pending events; each is delivered at most once. */
+    fun drainEvents(): List<CoreEvent> = eventQ.toList().also { eventQ.clear() }
 
     private var roundStartNs = 0L
     private var lapStartNs = 0L
@@ -131,7 +141,7 @@ class RaceTimingCore(
         expectedIdx = 0; lapsCompleted = 0; penaltyNs = 0L; lapInvalid = false
         validLapsNs.clear(); splitsNs.clear()
         lastPos = null; lastCrossIdx = -1; lastCrossNs = 0L
-        boostUntilNs = 0L; lastEvent = CoreEvent.NONE
+        boostUntilNs = 0L; eventQ.clear()
     }
 
     fun boostActive(): Boolean = now() < boostUntilNs
@@ -147,7 +157,7 @@ class RaceTimingCore(
             handle(a, p)
             // timeout
             if (clockStarted && !finished && now() - roundStartNs >= timeLimitNs) {
-                dnf = true; finished = true; lastEvent = CoreEvent.TIMEOUT_DNF
+                dnf = true; finished = true; eventQ.add(CoreEvent.TIMEOUT_DNF)
             }
         }
         lastPos = p
@@ -163,27 +173,24 @@ class RaceTimingCore(
             g.halfW, g.halfH, g.ring,
         )
         if (hit == 0) return
-        if (hit < 0) { lastEvent = CoreEvent.MISSED; return } // wrong way
+        if (hit < 0) { eventQ.add(CoreEvent.MISSED); return } // wrong way
 
         val t = now()
-        // Jump start: hit gate 0 before the clock started.
-        var jump = false
-        if (!clockStarted && expectedIdx == 0) {
-            penaltyNs += jumpStartPenaltyNs
-            jump = true
-        }
+        // Jump start only counts if a staging/countdown window is active before GO.
+        val jump = !clockStarted && expectedIdx == 0 && falseStartOnlyWithStaging && stagingActive
+        if (jump) penaltyNs += jumpStartPenaltyNs
         lastCrossIdx = expectedIdx
         lastCrossNs = t
-        lastEvent = if (jump) CoreEvent.JUMP_START else CoreEvent.GATE_HIT
+        eventQ.add(if (jump) CoreEvent.JUMP_START else CoreEvent.GATE_HIT)
 
         if (!clockStarted) {
             clockStarted = true; roundStartNs = t; lapStartNs = t; prevGateNs = t
-            lapsCompleted = 0; lapInvalid = false
+            lapsCompleted = 0; lapInvalid = false; stagingActive = false
             splitsNs.clear()
         } else {
             splitsNs.add(t - prevGateNs); prevGateNs = t
         }
-        if (g.boost) boostUntilNs = t + boostDurationNs
+        if (g.boost) { boostUntilNs = t + boostDurationNs; eventQ.add(CoreEvent.BOOST) }
 
         if (expectedIdx == 0) {
             val lapNs = t - lapStartNs

@@ -1475,7 +1475,7 @@ public class FlightControlCheck {
       var g0 = new dev.fpv.race.CoreGate(0,0,0, 0,0,1, 1.0,1.0, false, false);
       var core = new dev.fpv.race.RaceTimingCore(
         java.util.List.of(g0), /*laps*/1, /*limitNs*/1_000_000_000_000L, /*debounce*/1_000L,
-        /*jumpPen*/30_000_000_000L, /*boostDur*/800_000_000L, () -> clock[0]);
+        /*jumpPen*/30_000_000_000L, /*boostDur*/800_000_000L, /*staging*/true, () -> clock[0]);
       core.arm();
       for (double z=-2; z<=-0.2; z+=0.31) { clock[0]+=30_000_000L; core.step(0,0,z); }
       check("clock NOT started before timing gate", !core.getClockStarted(), "");
@@ -1490,7 +1490,7 @@ public class FlightControlCheck {
       // Boost gate g1 at z=10.
       clock[0]=0L;
       var g1 = new dev.fpv.race.CoreGate(0,0,10, 0,0,1, 1.0,1.0, false, true);
-      var cB = new dev.fpv.race.RaceTimingCore(java.util.List.of(g1), 1, 1_000_000_000_000L, 1_000L, 30_000_000_000L, 800_000_000L, () -> clock[0]);
+      var cB = new dev.fpv.race.RaceTimingCore(java.util.List.of(g1), 1, 1_000_000_000_000L, 1_000L, 30_000_000_000L, 800_000_000L, true, () -> clock[0]);
       cB.arm();
       for (double z=-2; z<=9.0; z+=0.31) { clock[0]+=30_000_000L; cB.step(0,0,z); }
       check("boost not active before gate", !cB.boostActive(), "");
@@ -1498,13 +1498,30 @@ public class FlightControlCheck {
       check("boost active right after boost gate", cB.boostActive(), "");
       System.out.printf("    boostUntilNs=%d clock=%d%n", cB.getBoostUntilNs(), clock[0]);
 
-      // Jump start: arm then immediately cross gate0 -> +30s penalty.
-      var c2 = new dev.fpv.race.RaceTimingCore(java.util.List.of(g0), 1, 1_000_000_000_000L, 1_000L, 30_000_000_000L, 800_000_000L, () -> clock[0]);
-      c2.arm();
-      clock[0]+=1_000_000L; c2.step(0,0,-2); c2.step(0,0,2); // cross gate0 while still armed
-      System.out.printf("    jumpStart penaltyNs=%d event=%s%n", c2.getPenaltyNs(), c2.getLastEvent());
-      check("jump start +30s penalty", c2.getPenaltyNs()==30_000_000_000L, ""+c2.getPenaltyNs());
-      check("jump-start event", c2.getLastEvent()==dev.fpv.race.CoreEvent.JUMP_START, String.valueOf(c2.getLastEvent()));
+      // --- Latch regression (E2E-001/002): legitimate start, no penalty; event drained once ---
+      // No staging -> crossing gate0 is the LEGAL start, must NOT be a jump.
+      var cL = new dev.fpv.race.RaceTimingCore(java.util.List.of(g0), 1, 1_000_000_000_000L, 1_000L, 30_000_000_000L, 800_000_000L, true, () -> clock[0]);
+      cL.arm();
+      clock[0]=0L; cL.step(0,0,-2); cL.step(0,0,2); // legal start crossing
+      var ev1 = cL.drainEvents();
+      check("legal start -> GATE_HIT, no JUMP", ev1.contains(dev.fpv.race.CoreEvent.GATE_HIT) && !ev1.contains(dev.fpv.race.CoreEvent.JUMP_START), ev1.toString());
+      check("penalty 0 on legal start", cL.getPenaltyNs()==0L, ""+cL.getPenaltyNs());
+      check("drain empties queue", cL.drainEvents().isEmpty(), "");
+      // 300 open-space frames: penalty must NOT accumulate (the old latch bug).
+      for (int i=0;i<300;i++){ clock[0]+=30_000_000L; cL.step(100,0,100); }
+      cL.drainEvents();
+      check("300 empty frames -> penalty still 0", cL.getPenaltyNs()==0L, ""+cL.getPenaltyNs());
+      // With staging ON, crossing gate0 before GO = JUMP, delivered once.
+      var cS = new dev.fpv.race.RaceTimingCore(java.util.List.of(g0), 1, 1_000_000_000_000L, 1_000L, 30_000_000_000L, 800_000_000L, true, () -> clock[0]);
+      cS.arm(); cS.setStagingActive(true);
+      clock[0]=0L; cS.step(0,0,-2); cS.step(0,0,2);
+      var evS = cS.drainEvents();
+      System.out.printf("    staging jump penaltyNs=%d events=%s%n", cS.getPenaltyNs(), evS);
+      check("staging pre-GO -> JUMP_START once", evS.contains(dev.fpv.race.CoreEvent.JUMP_START) && cS.getPenaltyNs()==30_000_000_000L, evS.toString());
+      cS.drainEvents();
+      for (int i=0;i<50;i++){ clock[0]+=30_000_000L; cS.step(100,0,100); }
+      cS.drainEvents();
+      check("post-jump open frames -> penalty stays 30s", cS.getPenaltyNs()==30_000_000_000L, ""+cS.getPenaltyNs());
     }
 
     // ---------- 42. LineHelper bearing + live gap ----------

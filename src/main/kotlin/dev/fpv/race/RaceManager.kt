@@ -170,19 +170,25 @@ object RaceManager {
             (phase == RacePhase.ARMED || phase == RacePhase.FLYING)
         ) {
             detectCrossing(prev, eye)
-            // Drive the pure timing core (boost expiry, jump-start, missed-gate flags).
+            // Drive the pure timing core; drain each event exactly once (no latch).
             core?.step(eye.x, eye.y, eye.z)
-            when (core?.lastEvent) {
-                CoreEvent.JUMP_START -> {
-                    penaltyMs += (race()?.penaltySec ?: F9URules.ABANDON_PENALTY_SEC).toLong() * 1000L
-                    flashText = "+30s JUMP START"
-                    flashUntil = System.currentTimeMillis() + 1500L
+            core?.drainEvents()?.forEach { ev ->
+                when (ev) {
+                    CoreEvent.JUMP_START -> {
+                        penaltyMs += (race()?.penaltySec ?: F9URules.ABANDON_PENALTY_SEC).toLong() * 1000L
+                        flashText = "+30s JUMP START"
+                        flashUntil = System.currentTimeMillis() + 1500L
+                    }
+                    CoreEvent.MISSED -> {
+                        flashText = "MISSED GATE - CORRECT"
+                        flashUntil = System.currentTimeMillis() + 1500L
+                    }
+                    CoreEvent.BOOST -> {
+                        flashText = "BOOST"
+                        flashUntil = System.currentTimeMillis() + 800L
+                    }
+                    else -> {}
                 }
-                CoreEvent.MISSED -> {
-                    flashText = "MISSED GATE - CORRECT"
-                    flashUntil = System.currentTimeMillis() + 1500L
-                }
-                else -> {}
             }
         }
         lastPos = eye
