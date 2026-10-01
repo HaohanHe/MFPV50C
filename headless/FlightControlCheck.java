@@ -1,5 +1,6 @@
 import dev.fpv.flight.FlightController;
 import dev.fpv.flight.FpvConfig;
+import dev.fpv.flight.TranslationalDynamics;
 import dev.fpv.input.StickChannels;
 import dev.fpv.input.AuxState;
 import org.joml.Quaternionf;
@@ -96,6 +97,17 @@ public class FlightControlCheck {
     return n == 0 ? 0 : acc / n;
   }
 
+  /** Drag-only per-axis delta (moving case minus zero-speed baseline) at zero
+   *  throttle, level attitude: isolates airframe drag from gravity/thrust. */
+  static float[] glideDrag(float vx, float vy, float vz) {
+    FpvConfig cfg = new FpvConfig();
+    TranslationalDynamics td = new TranslationalDynamics(cfg.activeAirframe());
+    Quaternionf level = new Quaternionf();
+    Vector3f base = td.step(level, 0f, 0.0, 0.0, 0.0, -1f, 1f, false, 0.05f);
+    Vector3f mov  = td.step(level, 0f, (double) vx, (double) vy, (double) vz, -1f, 1f, false, 0.05f);
+    return new float[]{ mov.x - base.x, mov.y - base.y, mov.z - base.z };
+  }
+
   public static void main(String[] a) {
     System.out.println("=== REAL FlightController headless verification (dt=" + DT + "s) ===");
 
@@ -145,6 +157,19 @@ public class FlightControlCheck {
     System.out.printf("    min body-up.y=%.2f, NaN=%s%n", lo[0], lo[1] == 1);
     check("no NaN/Inf over 30s", lo[1] == 0, "");
     check("30s hover stays upright (up.y>0.2)", lo[0] > 0.2, "min up.y=" + String.format("%.2f", lo[0]));
+
+    // ---------- 5. translational air drag: every direction, zero-throttle glide ----------
+    System.out.println("\n[5] Translational air drag (zero-throttle glide, level)");
+    float v = 0.5f;
+    float[] ds = glideDrag(v, 0f, 0f), dv = glideDrag(0f, v, 0f), df = glideDrag(0f, 0f, v);
+    float sSide = Math.abs(ds[0]), sVert = Math.abs(dv[1]), sFwd = Math.abs(df[2]);
+    System.out.printf("    drag side=%.4f fwd=%.4f vert=%.4f (blocks/tick)%n", sSide, sFwd, sVert);
+    check("side drag opposes motion", ds[0] < 0, "dx=" + String.format("%.4f", ds[0]));
+    check("forward drag opposes motion", df[2] < 0, "dz=" + String.format("%.4f", df[2]));
+    check("vertical drag opposes motion", dv[1] < 0, "dy=" + String.format("%.4f", dv[1]));
+    check("drag anisotropic vert>fwd>side", sVert > sFwd && sFwd > sSide,
+      String.format("%.3f > %.3f > %.3f", sVert, sFwd, sSide));
+    check("glide drag material even at t=0", sSide > 1e-4, "side=" + String.format("%.4f", sSide));
 
     System.out.println("\n========================================");
     System.out.println(failures == 0 ? "ALL TESTS PASS" : ("FAILURES: " + failures));

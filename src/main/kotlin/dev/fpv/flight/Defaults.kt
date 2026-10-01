@@ -172,6 +172,14 @@ object Defaults {
     const val ROTDAMP_YY = 0.040f
     const val ROTDAMP_ZZ = 0.055f
 
+    /** Body-frame quadratic airframe drag (per-tick coefficients), independent of
+     *  rotor speed so it still acts in a zero-throttle glide. Anisotropic: the
+     *  prop disk resists vertical motion most, forward flight next, lateral least.
+     *  Engineering starting values, tunable. */
+    const val FRAME_DRAG_SIDE = 0.012f   // body X, lateral
+    const val FRAME_DRAG_FWD = 0.018f    // body Z, forward/back
+    const val FRAME_DRAG_VERT = 0.022f   // body Y, up/down
+
     /** Simple proportional rate gain used when the inner PID loop is disabled
      *  (1/deg per second of error); engineering starting value. */
     const val SIMPLE_RATE_P_GAIN = 0.004f

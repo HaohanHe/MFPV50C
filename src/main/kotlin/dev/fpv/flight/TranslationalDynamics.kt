@@ -72,30 +72,39 @@ class TranslationalDynamics(val af: AirframeProfile) {
         var dy = up.y() * thrustDelta - GRAVITY * (af.gravity / 9.81f)
         var dz = up.z() * thrustDelta
 
-        // World aerodynamic drag: linear + quadratic, mass/airspeed scaled.
+        // ---- Aerodynamic drag: acts in every direction, not just after throttle cut ----
+        val massScale = REF_MASS_KG / mass
+        val airScale = (af.airDrag / 0.40f) * af.relativeAirspeed
         val speed = sqrt(vx * vx + vy * vy + vz * vz).toFloat()
-        if (speed > 1e-4f) {
-            val massScale = REF_MASS_KG / mass
-            val airScale = (af.airDrag / 0.40f) * af.relativeAirspeed
-            val decel = (af.linearDrag * speed + af.quadraticDrag * speed * speed) *
-                massScale * airScale
-            dx -= decel * (vx.toFloat() / speed)
-            dy -= decel * (vy.toFloat() / speed)
-            dz -= decel * (vz.toFloat() / speed)
+
+        // 1. World-frame linear (viscous) drag, isotropic.
+        if (speed > 1e-4f && af.linearDrag > 0f) {
+            val lin = af.linearDrag * speed * massScale * airScale
+            dx -= lin * (vx.toFloat() / speed)
+            dy -= lin * (vy.toFloat() / speed)
+            dz -= lin * (vz.toFloat() / speed)
         }
 
-        // Prop-speed body drag: F = -diag(cxy,cxy,cz) * sumRpm * vBody, then world.
-        val body = toBody(vx.toFloat(), vy.toFloat(), vz.toFloat(), attitude)
+        // Body-frame airspeed for the anisotropic terms.
+        val vb = toBody(vx.toFloat(), vy.toFloat(), vz.toFloat(), attitude)
+
+        // 2. Body-frame quadratic airframe drag (lateral/forward/vertical differ);
+        //    independent of rotor rpm, so it still decelerates a zero-throttle glide.
+        val qs = massScale * airScale
+        val fx = -qs * af.frameDragSide * vb.x * abs(vb.x)
+        val fy = -qs * af.frameDragVert * vb.y * abs(vb.y)
+        val fz = -qs * af.frameDragFwd * vb.z * abs(vb.z)
+        val frameDragW = Vector3f(fx, fy, fz).rotate(attitude)
+        dx += frameDragW.x(); dy += frameDragW.y(); dz += frameDragW.z()
+
+        // 3. Prop-speed body drag: F = -diag(cxy,cxy,cz) * sumRpm * vBody; scales
+        //    with rotor speed (vanishes as the rotors spool down). Body -> world.
         val rpmScale = tMag * af.motorCount
-        val bx = -af.bodyDragXY * rpmScale * body.x
-        val by = -af.bodyDragZ * rpmScale * body.y
-        val bz = -af.bodyDragXY * rpmScale * body.z
-        // rotate body-frame drag accel back to world (transpose of attitude)
-        val worldDrag = Vector3f(bx, by, bz)
-        worldDrag.rotate(Quaternionf(attitude).invert())
-        dx += worldDrag.x()
-        dy += worldDrag.y()
-        dz += worldDrag.z()
+        val px = -af.bodyDragXY * rpmScale * vb.x
+        val py = -af.bodyDragZ * rpmScale * vb.y
+        val pz = -af.bodyDragXY * rpmScale * vb.z
+        val propDragW = Vector3f(px, py, pz).rotate(attitude)
+        dx += propDragW.x(); dy += propDragW.y(); dz += propDragW.z()
 
         val out = Vector3f(dx, dy, dz)
         return if (!out.isFinite) Vector3f(0f, -GRAVITY, 0f) else out

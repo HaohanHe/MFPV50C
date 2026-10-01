@@ -199,6 +199,12 @@ class AirframeProfile {
      */
     var quadraticDrag: Float = 0.015f
 
+    /** Body-frame quadratic airframe drag, independent of rotor speed (glide drag):
+     *  lateral (body X), forward (body Z), vertical (body Y). */
+    var frameDragSide: Float = Defaults.FRAME_DRAG_SIDE
+    var frameDragFwd: Float = Defaults.FRAME_DRAG_FWD
+    var frameDragVert: Float = Defaults.FRAME_DRAG_VERT
+
     // ---- Rotational drag (per-axis) ----
     /** Angular drag about the pitch axis (N·m·s); tau = I / (b * airGrip). */
     var angularDragXX: Float = 0.44f

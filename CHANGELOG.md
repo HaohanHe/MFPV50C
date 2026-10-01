@@ -16,6 +16,9 @@ revision. No formal GitHub Release is published until real-hardware acceptance.
   per frame so profile switching still works.
 - **Bare `AirframeProfile` fallback thrust** was 35 N/motor (~3x real); corrected
   to 12 N to match the Freestyle 5" reference.
+- **Body-frame drag was rotated the wrong way to world**: both prop-speed and
+  frame drag used `attitude.invert()` for the body->world transform (should be
+  `attitude`), misdirecting the drag acceleration.
 
 ### Changed
 - **Per-axis mixer differential authority** replaces the single 0.22 value:
@@ -23,15 +26,20 @@ revision. No formal GitHub Release is published until real-hardware acceptance.
   differential). Full stick now reaches ~670 dps roll/pitch and ~400 dps yaw
   (yaw is reaction-torque limited, as on a real quad).
 - Reaction torque per motor calibrated 0.08 -> 0.15 N·m (5" torque/thrust ~0.012).
+- **Complete anisotropic airframe drag**: added body-frame quadratic drag that
+  acts in every direction even at zero throttle (glide) — vertical (prop disk)
+  0.022 > forward 0.018 > lateral 0.012 — alongside the world linear term and
+  the rpm-scaled prop drag. Drag is no longer only a post-throttle-cut slowdown.
 
 ### Added
 - **`headless/FlightControlCheck.java` + `run_headless.sh`** — reproducible
   headless verification of the REAL pipeline actually shipped on main
   (rates -> PID -> Quad-X mixer -> motor lag -> rigid body -> attitude, plus
   prop-wash): three-axis step (rise time, overshoot, pitch/roll symmetry),
-  zero-stick rate-hold, descent-vs-clean prop-wash, and 30 s closed-loop
-  stability with NaN guards. (The earlier `PhysicsCheck` exercised a different,
-  unmerged rigid-body implementation and does not apply to main.)
+  zero-stick rate-hold, descent-vs-clean prop-wash, 30 s closed-loop stability
+  with NaN guards, and per-direction translational glide drag (sign +
+  anisotropy). (The earlier `PhysicsCheck` exercised a different, unmerged
+  rigid-body implementation and does not apply to main.)
 
 ## [Unreleased] — graphical radio calibration + P-B remote compatibility
 
