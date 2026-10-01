@@ -296,6 +296,43 @@ class ExportConfig {
     var chaseDistance: Float = 2.5f
 }
 
+/**
+ * First-person immersion layer (module 1 optics / module 2 signal / module 3 audio).
+ * All coefficients are data-driven; the shaders/audio read these at runtime. Everything is
+ * mild-by-default and independently switchable; off == identity / silent.
+ */
+class ImmersionConfig {
+    // ---- module 1: optics (barrel / vignette / chromatic aberration) ----
+    /** Master switch for the post-process optics pass. Off == identity (no remap). */
+    var opticsEnabled: Boolean = true
+    /** Barrel distortion coefficient; negative = wide-angle wide lens feel. -0.4..0.0. */
+    var barrelK1: Float = Defaults.OPTICS_BARREL_K1
+    /** Secondary radial coefficient; 0 for a mild single-term wide lens. */
+    var barrelK2: Float = Defaults.OPTICS_BARREL_K2
+    /** Vignette strength 0..1 (edge darkening). */
+    var vignette: Float = Defaults.OPTICS_VIGNETTE
+    /** Static chromatic-aberration offset at the frame edge. */
+    var chromaticAberration: Float = Defaults.OPTICS_CA
+
+    // ---- module 2: signal / video glitch (LQ driven) ----
+    /** Master switch for the signal-interference pass. Off == clean picture. */
+    var glitchEnabled: Boolean = false
+    /** Home distance (blocks) at which LQ has fallen to ~50% (clean near, glitch far). */
+    var glitchHalfDistBlocks: Float = Defaults.GLITCH_HALF_DIST
+    /** Extra random fuzz added on top of the deterministic distance loss. */
+    var glitchNoise: Float = Defaults.GLITCH_NOISE
+
+    // ---- module 3: audio ----
+    /** Master switch for motor whine + beeps. */
+    var audioEnabled: Boolean = true
+    /** Motor whine base pitch at idle. */
+    var motorWhineBasePitch: Float = Defaults.WHINE_BASE_PITCH
+    /** Motor whine pitch multiplier at full throttle. */
+    var motorWhineFullPitch: Float = Defaults.WHINE_FULL_PITCH
+    /** Master beep volume 0..1. */
+    var beepVolume: Float = 0.6f
+}
+
 class FpvConfig {
     /** Schema version of the persisted file (used to select migration / detect old saves). */
     var schemaVersion = Defaults.CONFIG_SCHEMA_VERSION
@@ -414,6 +451,7 @@ class FpvConfig {
     var serverCompat: ServerCompatConfig? = ServerCompatConfig()
     var replay: ReplayConfig? = ReplayConfig()
     var export: ExportConfig? = ExportConfig()
+    var immersion: ImmersionConfig? = ImmersionConfig()
 
     // ---- Airframe (machine) profiles: data-driven physics ----
     /**

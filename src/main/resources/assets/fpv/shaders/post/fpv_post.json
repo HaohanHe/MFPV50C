@@ -1,0 +1,25 @@
+{
+    "targets": [ "swap" ],
+    "passes": [
+        {
+            "name": "fpv_post",
+            "intarget": "minecraft:main",
+            "outtarget": "swap",
+            "auxtargets": [
+                { "name": "DiffuseSampler", "id": "minecraft:main" }
+            ],
+            "uniforms": [
+                { "name": "Time", "values": [ 0.0 ] },
+                { "name": "SignalStrength", "values": [ 1.0 ] },
+                { "name": "BarrelK1", "values": [ -0.22 ] },
+                { "name": "Vignette", "values": [ 0.35 ] },
+                { "name": "ChromaticAberration", "values": [ 0.004 ] }
+            ]
+        },
+        {
+            "name": "blit",
+            "intarget": "swap",
+            "outtarget": "minecraft:main"
+        }
+    ]
+}

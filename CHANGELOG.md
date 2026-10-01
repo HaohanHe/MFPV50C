@@ -8,6 +8,23 @@ revision. No formal GitHub Release is published until real-hardware acceptance.
 
 ## [Unreleased] — OSD refactor: data-driven element registry
 
+### Added (immersion layer: optics / signal / audio logic + shader resources)
+- **`flight/ImmersionConfig`** (FpvConfig): data-driven optics (BarrelK1=-0.22, K2=0,
+  vignette=0.35, CA=0.004), glitch (half-distance, noise; default off), audio (whine base/full
+  pitch, beep volume). All independently switchable; off == identity / silent.
+- Pure headless-tested math: `flight/OpticsMath.kt` (radial barrel remap + vignette),
+  `flight/SignalModel.kt` (home distance -> LQ -> badness, block>=0.25 / freeze>=0.4 tiers),
+  `flight/MotorTone.kt` (rpm->whine pitch monotonic; ARM/DISARM/BAT_LOW/CRIT/RX_LOST beep
+  classification — rhythm self-composed, no GPL array copied).
+- Shader resources: `assets/fpv/shaders/post/fpv_post.json` +
+  `assets/minecraft/shaders/program/fpv_post.{vsh,fsh,json}` — barrel remap, vignette, CA,
+  LQ-driven block/bar/grain grading (clean-room on FPVEffect MIT structure).
+- headless [36] optics (center identity, edge inward/monotonic, off==identity, vignette edge
+  darker), [37] signal (lq@0=1, @half=0.5, tier thresholds), [38] tone/beeps.
+- NOTE: the GameRenderer `loadPostProcessor`/uniforms wiring and the AbstractTickableSoundInstance
+  playback are **not** compiled in yet — the exact 1.21.11 mapped class names need in-game
+  verification (需真机). Pure math + shader JSON/GLSL are in place.
+
 ### Added (module 4: emergent aerobatics harness)
 - **`flight/Aerobatics.kt`**: a closed-loop headless harness that drives the REAL flight
   controller (stick setpoint -> PID -> motor lag -> torque -> rigid-body integration) AND the

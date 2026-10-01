@@ -1328,6 +1328,66 @@ public class FlightControlCheck {
       check("all remaining maneuvers finite (no NaN/divergence)", !anyNan, "anyNan="+anyNan);
     }
 
+    // ---------- 36. Module 1 optics math (barrel remap + vignette) ----------
+    System.out.println("\n[36] module-1 optics math");
+    {
+      var opt = dev.fpv.flight.OpticsMath.INSTANCE;
+      // center stays put under any K.
+      float[] c = opt.barrelRemap(0.5f, 0.5f, -0.22f, 0f);
+      check("barrel center identity", Math.abs(c[0]-0.5f)<1e-6 && Math.abs(c[1]-0.5f)<1e-6, c[0]+","+c[1]);
+      // off (K1=K2=0) == identity everywhere.
+      float[] edge = opt.barrelRemap(1.0f, 0.5f, 0f, 0f);
+      check("optics off == identity at edge", Math.abs(edge[0]-1.0f)<1e-6 && Math.abs(edge[1]-0.5f)<1e-6, edge[0]+","+edge[1]);
+      // negative K1 (wide lens) pulls the edge inward monotonically with radius.
+      float[] e1 = opt.barrelRemap(0.75f, 0.5f, -0.22f, 0f);
+      float[] e2 = opt.barrelRemap(1.0f, 0.5f, -0.22f, 0f);
+      check("wide-lens edge pulled inward (0.75 -> <0.75)", e1[0]<0.75f, ""+e1[0]);
+      check("edge displacement monotonic in radius", (e2[0]-0.5f) > (e1[0]-0.5f) && e2[0]<1.0f, e2[0]+"" );
+      // vignette: edge darker than center.
+      float vC = opt.vignette(0.5f, 0.5f, 0.35f);
+      float vE = opt.vignette(1.0f, 0.5f, 0.35f);
+      System.out.printf("    vig center=%.3f edge=%.3f%n", vC, vE);
+      check("vignette edge darker than center", vE < vC, ""+vE);
+      check("vignette off==1 (center)", Math.abs(vC-1f)<1e-6, ""+vC);
+    }
+
+    // ---------- 37. Module 2 signal model ----------
+    System.out.println("\n[37] module-2 signal model");
+    {
+      var sig = dev.fpv.flight.SignalModel.INSTANCE;
+      double lq0 = sig.linkQuality(0, 120f);
+      double lqHalf = sig.linkQuality(120, 120f);
+      double lqFar = sig.linkQuality(400, 120f);
+      System.out.printf("    lq@0=%.2f lq@120=%.2f lq@400=%.2f%n", lq0, lqHalf, lqFar);
+      check("lq clean at home (=1)", lq0 > 0.99, ""+lq0);
+      check("lq ~0.5 at half-distance", Math.abs(lqHalf-0.5) < 0.02, ""+lqHalf);
+      check("lq drops far from home", lqFar < lqHalf, ""+lqFar);
+      double bad = sig.badness(lqFar);
+      check("far -> high badness", bad > 0.5, ""+bad);
+      check("blockCorrupt triggers beyond 0.25", sig.blockCorruptActive(0.3), "");
+      check("frameFreeze triggers beyond 0.40", sig.frameFreezeActive(0.5), "");
+      check("clean LQ stays clean tier", sig.tier(sig.badness(0.99)).equals("clean"), sig.tier(sig.badness(0.99)));
+      check("off/clean -> no glitch tier", sig.tier(0.0).equals("clean"), sig.tier(0.0));
+    }
+
+    // ---------- 38. Module 3 motor tone + beep events ----------
+    System.out.println("\n[38] module-3 motor tone / beep");
+    {
+      var tone = dev.fpv.flight.MotorTone.INSTANCE;
+      float pIdle = tone.pitchForSpeed(0f, 0.8f, 2.5f);
+      float pHalf = tone.pitchForSpeed(0.5f, 0.8f, 2.5f);
+      float pFull = tone.pitchForSpeed(1f, 0.8f, 2.5f);
+      System.out.printf("    pitch idle=%.2f half=%.2f full=%.2f%n", pIdle, pHalf, pFull);
+      check("whine pitch monotonic in rpm", pIdle < pHalf && pHalf < pFull, pIdle+"<"+pHalf+"<"+pFull);
+      check("whine full = base*fullMul", Math.abs(pFull-0.8f*2.5f)<1e-5, ""+pFull);
+      check("signed 3D speed uses |m|", Math.abs(tone.pitchForSpeed(-1f,0.8f,2.5f)-pFull)<1e-5, "");
+      check("beep ARM on arm", tone.event(3.9f,true,false,false)==dev.fpv.flight.MotorTone.Beep.ARM, "");
+      check("beep DISARM on disarm", tone.event(3.9f,false,true,false)==dev.fpv.flight.MotorTone.Beep.DISARM, "");
+      check("beep BAT_LOW <3.6", tone.event(3.5f,false,false,false)==dev.fpv.flight.MotorTone.Beep.BAT_LOW, "");
+      check("beep BAT_CRIT <3.3", tone.event(3.1f,false,false,false)==dev.fpv.flight.MotorTone.Beep.BAT_CRIT, "");
+      check("beep RX_LOST wins", tone.event(3.9f,true,false,true)==dev.fpv.flight.MotorTone.Beep.RX_LOST, "");
+    }
+
     System.out.println("\n========================================");
     System.out.println(failures == 0 ? "ALL TESTS PASS" : ("FAILURES: " + failures));
     System.exit(failures == 0 ? 0 : 1);

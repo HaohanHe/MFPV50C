@@ -97,6 +97,22 @@ object Defaults {
     /** Interval between repeated locate-beep cues while the BEEPER function is active. */
     const val BEEPER_INTERVAL_SEC = 0.5f
 
+    // ---- Immersion layer: optics / signal / audio (research report-immersion §4) ----
+    /** Mild wide-lens barrel coefficient (report: -0.22, range -0.4..0.0). */
+    const val OPTICS_BARREL_K1 = -0.22f
+    const val OPTICS_BARREL_K2 = 0.0f
+    /** Vignette strength (report: 0.35). */
+    const val OPTICS_VIGNETTE = 0.35f
+    /** Static edge chromatic aberration (report: 0.004). */
+    const val OPTICS_CA = 0.004f
+    /** Home distance (blocks) where LQ drops to ~50%. */
+    const val GLITCH_HALF_DIST = 120f
+    /** Extra random fuzz on top of deterministic distance loss. */
+    const val GLITCH_NOISE = 0.05f
+    /** Motor whine pitch at idle / full throttle (report: 0.8 / ~2.5x). */
+    const val WHINE_BASE_PITCH = 0.8f
+    const val WHINE_FULL_PITCH = 2.5f
+
     // ---- Setpoint (RC) smoothing ----
     /** Published setpoint-smoother floor; engineering starting cutoff (Hz). */
     const val SETPOINT_SMOOTHING_ENABLED = true

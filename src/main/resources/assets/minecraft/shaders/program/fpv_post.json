@@ -1,0 +1,24 @@
+{
+    "blend": {
+        "func": "add",
+        "src_rgb": "one",
+        "dst_rgb": "zero",
+        "src_alpha": "one",
+        "dst_alpha": "zero"
+    },
+    "vertex": "fpv_post",
+    "fragment": "fpv_post",
+    "attributes": [ "Position" ],
+    "uniforms": [
+        { "name": "ProjMat", "type": "matrix4x4", "count": 16, "values": [ 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0 ] },
+        { "name": "OutSize", "type": "float", "count": 2, "values": [ 1.0, 1.0 ] },
+        { "name": "Time", "type": "float", "count": 1, "values": [ 0.0 ] },
+        { "name": "SignalStrength", "type": "float", "count": 1, "values": [ 1.0 ] },
+        { "name": "BarrelK1", "type": "float", "count": 1, "values": [ -0.22 ] },
+        { "name": "Vignette", "type": "float", "count": 1, "values": [ 0.35 ] },
+        { "name": "ChromaticAberration", "type": "float", "count": 1, "values": [ 0.004 ] }
+    ],
+    "samplers": [
+        { "name": "DiffuseSampler" }
+    ]
+}
