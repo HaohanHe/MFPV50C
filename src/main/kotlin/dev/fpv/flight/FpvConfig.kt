@@ -199,7 +199,7 @@ class ServerCompatConfig {
     var fireworkEnabled: Boolean = true
 
     /** Throttle (0..1) above which a firework boost is requested. */
-    var fireworkThrottleThreshold: Float = 0.5f
+    var fireworkThrottleThreshold: Float = 0.25f
 
     /** Minimum ticks between two firework uses (anti-spam). */
     var fireworkMinIntervalTicks: Int = 20

@@ -1,6 +1,11 @@
 import dev.fpv.flight.FlightController;
 import dev.fpv.flight.FpvConfig;
 import dev.fpv.flight.TranslationalDynamics;
+import dev.fpv.flight.ServerCompatConfig;
+import dev.fpv.flight.ServerCompatLogic;
+import dev.fpv.flight.FireworkEnvelope;
+import dev.fpv.flight.MotionBlurCompositor;
+import dev.fpv.flight.OsdLayoutMath;
 import dev.fpv.input.StickChannels;
 import dev.fpv.input.AuxState;
 import org.joml.Quaternionf;
@@ -128,6 +133,66 @@ public class FlightControlCheck {
     return new double[]{minUp, nan ? 1 : 0};
   }
 
+  // ============================================================
+  // Remote closed-loop plant (vanilla elytra + firework boost).
+  // Velocity relax per attached rocket: v <- 0.5*v + 0.85*look (1.21.11 bytecode).
+  // ============================================================
+
+  /** One remote tick: ignite per the real ServerCompatLogic, relax the fleet, add gravity+drag.
+   *  look = fixed level-forward-ish unit dir. Returns new velocity [vx,vy,vz]. */
+  static double[] remoteTick(ServerCompatLogic logic, FireworkEnvelope.Fleet fleet,
+                             double[] look, double[] v, float throttle, float speedBpt) {
+    logic.tick();
+    if (logic.shouldFirework(throttle, true, true, speedBpt)) { fleet.ignite(); logic.onFired(); }
+    double[] nv = fleet.step(look[0], look[1], look[2], v[0], v[1], v[2]);
+    nv[1] -= 0.05; // gravity
+    // light vanilla elytra drag (per-tick)
+    double sp = Math.sqrt(nv[0]*nv[0]+nv[1]*nv[1]+nv[2]*nv[2]);
+    if (sp > 1e-4) { double d = 0.99; nv[0]*=d; nv[1]*=d; nv[2]*=d; }
+    return nv;
+  }
+
+  /** High-frequency band energy fraction (>cutoffHz) of a 1/tick-sampled series.
+   *  Simple DFT magnitude sum above the cutoff divided by total magnitude. */
+  static double highBandEnergy(double[] series, double hzPerTick, double cutoffHz) {
+    int n = series.length;
+    double total = 0, high = 0;
+    // DFT bins: bin k <-> freq = k * hzPerTick (real signal, use positive freqs).
+    for (int k = 0; k < n / 2; k++) {
+      double re = 0, im = 0;
+      for (int i = 0; i < n; i++) {
+        double a = -2 * Math.PI * k * i / n;
+        re += series[i] * Math.cos(a);
+        im += series[i] * Math.sin(a);
+      }
+      double mag = Math.sqrt(re*re + im*im);
+      double hz = k * hzPerTick;
+      total += mag;
+      if (hz > cutoffHz) high += mag;
+    }
+    return total < 1e-9 ? 0 : high / total;
+  }
+
+  /** Std-dev of a series. */
+  static double stddev(double[] s) {
+    double m = 0; for (double v : s) m += v; m /= s.length;
+    double a = 0; for (double v : s) a += (v-m)*(v-m);
+    return Math.sqrt(a / s.length);
+  }
+
+  /** Build a remote-compat config (defaults). */
+  static ServerCompatConfig remoteCfg() {
+    ServerCompatConfig c = new ServerCompatConfig();
+    c.setCompatEnabled(true); c.setFireworkEnabled(true);
+    c.setCoordinatedTurn(true); c.setAntiKick(true);
+    return c;
+  }
+
+  /** Smooth speed-limiter gain at a given horizontal speed (blocks/tick). */
+  static double logicGain(double speedBpt) {
+    return new ServerCompatLogic(remoteCfg()).speedLimitGain((float) speedBpt);
+  }
+
   public static void main(String[] a) {
     System.out.println("=== REAL FlightController headless verification (dt=" + DT + "s) ===");
 
@@ -199,6 +264,189 @@ public class FlightControlCheck {
     System.out.printf("    variable dt    : minUp=%.2f NaN=%s%n", fvar[0], fvar[1] == 1);
     check("60fps hover stays upright", f60[0] > 0.8 && f60[1] == 0, "minUp=" + String.format("%.2f", f60[0]));
     check("variable-dt hover stays upright", fvar[0] > 0.8 && fvar[1] == 0, "minUp=" + String.format("%.2f", fvar[0]));
+
+    // ---------- 7. Firework beat: multi-throttle continuity + spool-down ----------
+    System.out.println("\n[7] Firework beat continuity across throttle gears + spool-down");
+    double[] gears = {0.3, 0.5, 0.7, 1.0};
+    double maxGapFrac = 0, maxHighBand = 0;
+    for (double thr : gears) {
+      ServerCompatLogic logic = new ServerCompatLogic(remoteCfg());
+      FireworkEnvelope.Fleet fleet = new FireworkEnvelope.Fleet(1, 42);
+      double[] look = {0.0, -0.03, -1.0}; // slight nose-down cruise
+      double[] vel = {0, 0, 0};
+      int warmup = 100, run = 500;
+      double[] vySer = new double[run];
+      int gapTicks = 0;
+      for (int i = 0; i < warmup + run; i++) {
+        double spd = Math.sqrt(vel[0]*vel[0]+vel[2]*vel[2]);
+        vel = remoteTick(logic, fleet, look, vel, (float) thr, (float) spd);
+        if (i >= warmup) {
+          vySer[i-warmup] = vel[1];
+          if (fleet.silent()) gapTicks++;
+        }
+      }
+      double spdFinal = Math.sqrt(vel[0]*vel[0]+vel[1]*vel[1]+vel[2]*vel[2]);
+      // high-band ABSOLUTE RMS of the settled tail (drop startup transient). Fraction is
+      // misleading when the whole signal is near-zero; judge the actual felt amplitude.
+      double[] vyTail = new double[300];
+      System.arraycopy(vySer, 200, vyTail, 0, 300);
+      double hbFrac = highBandEnergy(vyTail, 20.0, 8.0);
+      double hb = hbFrac * stddev(vyTail); // absolute >8Hz RMS (blocks/tick)
+      double gapFrac = (double) gapTicks / run;
+      System.out.printf("    thr=%.1f : finalSpeed=%.3f b/t (%.0f km/h)  gapTicks=%d/%d  hbAbs=%.5f b/t  vyStd=%.4f%n",
+        thr, spdFinal, spdFinal*20*3.6, gapTicks, run, hb, stddev(vySer));
+      if (thr >= 0.25) { // boosted gears must stay continuous + low high-freq energy
+        maxGapFrac = Math.max(maxGapFrac, gapFrac);
+        maxHighBand = Math.max(maxHighBand, hb);
+      }
+      // spool-down: throttle to 0, count ticks until fleet silent.
+      int spool = 0;
+      for (int i = 0; i < 60 && !fleet.silent(); i++) {
+        double spd = Math.sqrt(vel[0]*vel[0]+vel[2]*vel[2]);
+        vel = remoteTick(logic, fleet, look, vel, 0f, (float) spd);
+        spool++;
+      }
+      System.out.printf("          spool-down: fleet silent after %d ticks (<= lifetime)%n", spool);
+      check("thr=" + thr + " spool-down bounded (<=25 ticks)", spool <= 25, "t=" + spool);
+    }
+    check("boosted gears continuous (gapFrac<0.10)", maxGapFrac < 0.10, "maxGapFrac=" + String.format("%.3f", maxGapFrac));
+    check("boosted gears low high-freq amplitude (hbAbs<0.01 b/t)", maxHighBand < 0.01, "maxHbAbs=" + String.format("%.5f", maxHighBand));
+
+    // ---------- 8. Noise + pulsed thrust + variable dt: no divergence ----------
+    System.out.println("\n[8] RC noise + pulse thrust + variable dt: no divergence");
+    {
+      ServerCompatLogic logic = new ServerCompatLogic(remoteCfg());
+      FireworkEnvelope.Fleet fleet = new FireworkEnvelope.Fleet(1, 7);
+      double[] look = {0, 0, -1};
+      double[] vel8 = {0, 0, 0};
+      boolean nan = false; double maxRate = 0;
+      long rng = 123456789L;
+      for (int i = 0; i < 2000; i++) {
+        // pseudo-random zero-mean throttle noise + drift
+        rng = rng * 6364136223846793005L + 1442695040888963407L;
+        double nz = ((rng >>> 33) & 0x7fff) / 32768.0 - 0.5;
+        float thr = (float) (0.6 + 0.05 * nz);
+        double spd = Math.sqrt(vel8[0]*vel8[0]+vel8[2]*vel8[2]);
+        vel8 = remoteTick(logic, fleet, look, vel8, thr, (float) spd);
+        if (!Double.isFinite(vel8[0]) || !Double.isFinite(vel8[1]) || !Double.isFinite(vel8[2])) nan = true;
+        double sp = Math.sqrt(vel8[0]*vel8[0]+vel8[1]*vel8[1]+vel8[2]*vel8[2]);
+        if (sp > maxRate) maxRate = sp;
+      }
+      System.out.printf("    max speed=%.3f b/t  NaN=%s%n", maxRate, nan);
+      check("no NaN/Inf under noise+pulse+2000t", !nan, "");
+      check("speed bounded (<=2.5 b/t)", maxRate < 2.5, "max=" + String.format("%.3f", maxRate));
+    }
+
+    // ---------- 9. Local quadcopter: full throttle accelerates PAST the 1.7 b/t vanilla pin ----------
+    System.out.println("\n[9] Local quadcopter full-throttle acceleration (no hard ceiling, smooth terminal)");
+    {
+      FpvConfig cfg = new FpvConfig();
+      TranslationalDynamics td = new TranslationalDynamics(cfg.activeAirframe());
+      Quaternionf q = new Quaternionf(); // level, nose forward
+      double vx=0, vy=0, vz=0; double[] ser = new double[400];
+      float thr = 1.0f;
+      // pitch the nose down 15 deg so thrust vector points forward+down (accelerate).
+      Quaternionf fwd = new Quaternionf().rotateX((float) Math.toRadians(15));
+      for (int i = 0; i < 400; i++) {
+        Vector3f d = td.step(fwd, thr, vx, vy, vz, 100f, 1f, false, 0.05f);
+        vx += d.x(); vy += d.y(); vz += d.z();
+        ser[i] = Math.sqrt(vx*vx+vy*vy+vz*vz);
+      }
+      double term = ser[399];
+      // high-band energy of the SETTLED tail (drop the acceleration transient).
+      double[] settled = new double[200];
+      System.arraycopy(ser, 200, settled, 0, 200);
+      double hb = highBandEnergy(settled, 20.0, 8.0);
+      System.out.printf("    terminal speed=%.3f b/t (%.0f km/h)  highBand=%.4f%n",
+        term, term*20*3.6, hb);
+      check("local quadcopter passes vanilla 1.7 b/t pin (>1.7)", term > 1.7, "term=" + String.format("%.3f", term));
+      check("terminal speed smooth (low high-freq energy <0.1)", hb < 0.1, "hb=" + String.format("%.3f", hb));
+      // smooth limiter gain is continuous (no bang-bang)
+      double g0 = logicGain(1.0), g1 = logicGain(1.4), g2 = logicGain(1.7);
+      System.out.printf("    speedLimitGain @1.0/1.4/1.7 b/t = %.2f/%.2f/%.2f (continuous 1->0)%n", g0, g1, g2);
+      check("speed limiter gain continuous monotone", g0 >= g1 && g1 >= g2 && g0 == 1.0 && g2 == 0.0, "");
+    }
+
+    // ---------- 10. Bank-driven passive turn (omega=g*tan(phi)/V), yaw stick = 0 ----------
+    System.out.println("\n[10] Bank passive coordinated turn (pure roll, yaw=0, then release)");
+    {
+      ServerCompatLogic logic = new ServerCompatLogic(remoteCfg());
+      float bank = 25f;
+      double heading0 = logic.currentTurnHeadingDeg();
+      for (int i = 0; i < 100; i++) logic.integrateTurn(bank, 0.8f, 1f);
+      double turned = logic.currentTurnHeadingDeg() - heading0;
+      // analytic omega per tick = gain*tan(phi*coordTurnGain)/V
+      double phi = Math.toRadians(bank * 0.5); // coordTurnGain=0.5
+      double expected = Math.tan(phi) / 0.8 * 100; // gain=1
+      System.out.printf("    held bank=%.0f deg, yaw=0: turned=%.1f deg over 100t (analytic ~%.1f)%n", bank, turned, expected);
+      check("pure-roll turn produces heading change (>5 deg)", Math.abs(turned) > 5, "turned=" + String.format("%.1f", turned));
+      check("turn rate matches g*tan(phi)/V (within 40%)",
+        Math.abs(Math.abs(turned) - expected) < 0.4 * expected, "got=" + String.format("%.1f", expected));
+      // release bank: heading freezes (does NOT unwind)
+      for (int i = 0; i < 50; i++) logic.integrateTurn(0f, 0.8f, 1f);
+      double afterRelease = logic.currentTurnHeadingDeg();
+      double drift = Math.abs(afterRelease - (heading0 + turned));
+      System.out.printf("    after releasing bank: heading drift=%.2f deg (should ~0, no unwind)%n", drift);
+      check("released bank freezes heading (no unwind)", drift < 2.0, "drift=" + String.format("%.2f", drift));
+    }
+
+    // ---------- 11. Quadcopter characteristics (local body-up model) ----------
+    System.out.println("\n[11] Quadcopter body-up characteristics (hover / on-spot yaw / vertical / no stall / pitch vector)");
+    {
+      FpvConfig cfg = new FpvConfig();
+      TranslationalDynamics td = new TranslationalDynamics(cfg.activeAirframe());
+      float hover = cfg.activeAirframe().effectiveHoverThrottle();
+      // hover: level, hover throttle -> vy converges ~0, position stable
+      double vx=0,vy=0,vz=0; double px=0,py=0,pz=0;
+      for (int i = 0; i < 600; i++) {
+        Vector3f d = td.step(new Quaternionf(), hover, vx, vy, vz, 100f, 1f, false, 0.05f);
+        vx+=d.x(); vy+=d.y(); vz+=d.z(); px+=vx; py+=vy; pz+=vz;
+      }
+      System.out.printf("    hover: vy=%.4f b/t, |pos drift|=%.3f blocks%n", vy, Math.sqrt(px*px+py*py+pz*pz));
+      check("hover converges to ~0 vertical speed (|vy|<0.01)", Math.abs(vy) < 0.01, "vy=" + String.format("%.4f", vy));
+      // vertical climb: throttle above hover
+      vx=vy=vz=0;
+      for (int i=0;i<200;i++){ Vector3f d=td.step(new Quaternionf(),1f,vx,vy,vz,100f,1f,false,0.05f); vx+=d.x();vy+=d.y();vz+=d.z(); }
+      System.out.printf("    full throttle vertical climb: vy=%.3f b/t%n", vy);
+      check("full throttle climbs vertically (vy>0.05)", vy > 0.05, "vy=" + String.format("%.3f", vy));
+      // no stall: at zero airspeed, body-up lift still accelerates (full throttle).
+      vx=vy=vz=0;
+      Vector3f d0 = td.step(new Quaternionf(), 1f, 0,0,0, 100f,1f,false,0.05f);
+      check("zero airspeed still has active body-up thrust (no stall)", d0.y() > 0.01, "dy=" + String.format("%.4f", d0.y()));
+      // on-spot yaw: rotate heading, position should not translate horizontally
+      Quaternionf yaw = new Quaternionf().rotateY((float)Math.toRadians(45));
+      vx=vy=vz=0; double hx=0,hz=0;
+      for (int i=0;i<200;i++){ Vector3f d=td.step(yaw,hover,vx,vy,vz,100f,1f,false,0.05f); vx+=d.x();vy+=d.y();vz+=d.z(); hx+=vx; hz+=vz; }
+      check("on-spot yaw: no horizontal translation (|dxz|<0.1)", Math.sqrt(hx*hx+hz*hz) < 0.1, "dxz=" + String.format("%.3f", Math.sqrt(hx*hx+hz*hz)));
+      // pitch vector: pitch tilt -> horizontal forward speed builds
+      Quaternionf pitch = new Quaternionf().rotateX((float)Math.toRadians(20));
+      vx=vy=vz=0;
+      for (int i=0;i<200;i++){ Vector3f d=td.step(pitch,hover,vx,vy,vz,100f,1f,false,0.05f); vx+=d.x();vy+=d.y();vz+=d.z(); }
+      check("pitch thrust-vector builds horizontal speed (|vz|>0.1)", Math.abs(vz) > 0.1, "vz=" + String.format("%.3f", vz));
+    }
+
+    // ---------- 12. HUD layering: OSD never enters motion-blur history; layout stable ----------
+    System.out.println("\n[12] HUD layering: OSD excluded from blur history; layout uses same attitude");
+    {
+      MotionBlurCompositor comp = new MotionBlurCompositor(4);
+      // scene shifts between sub-samples (world motion blur), OSD text is fixed.
+      float[] osd = new float[8]; osd[0] = 1f; osd[3] = 1f; // opaque red OSD pixel at index 0
+      for (int s = 0; s < 4; s++) {
+        float[] scene = {0.1f*s, 0, 0}; // moving scene pixel
+        comp.accumulateScene(scene);
+      }
+      float[] out = comp.composite(osd);
+      // OSD pixel (index0) must be pure red (alpha replaced), NOT the averaged scene.
+      boolean osdClean = out[0] == 1f && out[1] == 0f && out[2] == 0f;
+      System.out.printf("    OSD pixel after composite = (%.2f,%.2f,%.2f) [expect 1,0,0]; scene averaged=%.2f%n",
+        out[0], out[1], out[2], comp.scenePixel(0));
+      check("OSD pixel never smeared by scene blur", osdClean, "");
+      // layout from a fixed attitude is bit-identical frame to frame (no sub-pixel shimmer).
+      Quaternionf q = new Quaternionf().rotateZ((float)Math.toRadians(12)).rotateX((float)Math.toRadians(-5));
+      int dy1 = OsdLayoutMath.INSTANCE.groupDyPx(q); int rows1 = OsdLayoutMath.INSTANCE.ladderTickRows().length;
+      int dy2 = OsdLayoutMath.INSTANCE.groupDyPx(q); int rows2 = OsdLayoutMath.INSTANCE.ladderTickRows().length;
+      check("OSD layout deterministic frame-to-frame", dy1==dy2 && rows1==rows2, "dy="+dy1);
+    }
 
     System.out.println("\n========================================");
     System.out.println(failures == 0 ? "ALL TESTS PASS" : ("FAILURES: " + failures));

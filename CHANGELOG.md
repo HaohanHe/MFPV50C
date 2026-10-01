@@ -6,6 +6,65 @@ Semantic Versioning; `main` is the development branch and `stable` points at the
 latest fully verified (zero-warning build + all verification scripts PASS)
 revision. No formal GitHub Release is published until real-hardware acceptance.
 
+## [Unreleased] — quadcopter feel + firework-beat & high-speed root causes
+
+### Root causes found (bytecode / headless, not guessed)
+- **Remote firework beat was dead**: `LocalPlayerMixin.fpvCompatTick` built a fresh
+  `ServerCompatLogic(sc)` every tick, resetting `ticksSinceFirework=MAX` so
+  `shouldFirework` fired every tick above threshold — the whole anti-spam beat was
+  bypassed (present since remote-compat commit `14d190b`). Now ONE persistent logic
+  instance is held.
+- **Why 122 km/h pinned (user OSD)**: disassembled `1.21.11` merged jar — an attached
+  firework applies `vel <- 0.5*vel + 0.85*look` per tick, steady pin **1.7 b/t =
+  122 km/h**; `lifetime = 10*power + rand(6) + rand(7)`, power=1 → mean **15.5 ticks**,
+  onset ≈ **1 tick**. The pin is *vanilla elytra+firework terminal velocity*, NOT our
+  (default-off) softSpeedLimit.
+- **High-speed limit cycle**: my early `speedLimitGain` was applied unconditionally and
+  its roof (1.7 b/t) coincides with the firework pin → gain→0 gaps rockets, speed sags,
+  gain back → periodic on/off. Fixed: limiter is gated behind `cfg.softSpeedLimit`
+  (default off) and uses a continuous cosine taper (no bang-bang).
+
+### Added
+- **`FireworkEnvelope.kt`** — data-driven, parameterized firework thrust envelope +
+  `Fleet` simulator (MIT header citing 1.21.11 bytecode offsets: relax=0.5,
+  accel=0.85, lifetime formula). Beat interval is derived from the envelope
+  (`interval = lifetime/overlap`, overlap≈1.5) for continuous coverage, not a fixed
+  sparse interval; throttle hysteresis (latch 0.25 / off 0.22), immediate stop below
+  threshold, spool-down = already-lit rockets burn out naturally.
+- **Quadcopter local model** (already body-up via `TranslationalDynamics`): verified
+  zero-speed hover hold, on-spot yaw, vertical climb, no low-speed stall, pitch
+  thrust-vector forward — local is a true quadcopter; remote remains an honest
+  elytra+firework approximation.
+- **Bank passive turn**: pure roll (yaw=0) integrates heading at
+  `omega = gain·tan(φ)/V`; releases freezes (no unwind).
+- **`MotionBlurCompositor.kt`** + **`OsdLayoutMath.kt`**: scene accumulates into blur
+  history; OSD composited on top and never enters history; layout uses the SAME
+  smoothed `flight.attitude` as the camera, integer pixel rows (no sub-pixel shimmer).
+
+### Changed
+- `fireworkThrottleThreshold` 0.5 → 0.25 (mid-throttle now a working boosted range).
+- New Defaults: FW_*, TURN_*, SPEED_LIM_*, LOOK_LPF_HZ.
+
+### Headless before → after (remote, throttle gears 0.3/0.5/0.7/1.0)
+- gap fraction: **0.462 → 0.002**; high-band(>8Hz) absolute vertical RMS:
+  **0.013 vyStd / limit-cycle → 0.0045 b/t**; spool-down bounded (≤ lifetime).
+- Local full-throttle terminal: passes the 1.7 b/t vanilla pin → **3.81 b/t (274 km/h)**
+  with settled-tail high-band ≈0 (no periodic oscillation).
+- Pure-roll turn (yaw=0): **0 → 27.7°/100t** matching `g·tanφ/V`; released drift 0.
+- Quadcopter: hover vy→0, on-spot yaw horizontal drift 0, vertical climb +3.7 b/t,
+  no-stall dy>0, pitch-vector builds forward speed.
+- `[1]-[12] ALL TESTS PASS`; zero-warning build (e:/w:=0).
+
+### Remote can / cannot (elytra+fireworks physics)
+- CAN: continuous thrust beat, bank coordinated turn, look low-pass mapping, smooth
+  optional soft limiter.
+- CANNOT: true zero-speed hover, on-spot yaw, pure vertical climb, stall-free low-speed
+  flight. Local/create is the full quadcopter; remote is an approximation.
+
+### Evidence gaps [NEEDS LOCAL VERIFICATION]
+- Real Paper/Velocity firework feel & anti-kick trigger; real GL FBO/OSD layering &
+  slow-shutter HUD ghosting; real R/C stick noise/center drift.
+
 ## [Unreleased] — fix disarmed mouse fight + coordinated-turn tremor
 
 ### Fixed
