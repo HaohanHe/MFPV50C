@@ -193,22 +193,11 @@ object FpvOsd {
         }
 
         // ---- Center-anchored: artificial horizon + pitch ladder + sidebars ----
-        val inv = Quaternionf(flight.attitude).conjugate()
-        val bodyUp = Vector3f(0f, 1f, 0f).rotate(inv)
-        val bodyFwd = Vector3f(0f, 0f, -1f).rotate(inv)
-        // Sign matches the camera so the OSD line overlays the true horizon as
-        // seen in the already-rolled FPV picture (verified: roll-right 20 ->
-        // true horizon -20 on screen, old sign drew +20).
-        val roll = atan2(bodyUp.x, bodyUp.y)
-        // Current pitch relative to level (positive = nose down), from the same
-        // body/error convention used by the flight controller.
-        val currentPitchDeg = Math.toDegrees(
-            asin((-bodyFwd.y).coerceIn(-1f, 1f).toDouble())
-        ).toFloat()
-        // Synthetic-instrument vertical shift: nose-down pitches the view down,
-        // so the level horizon rises (negative GUI y). Verified by projecting the
-        // true horizon (screen y = -tan(pitch)); sign fixed in the cloud.
-        val groupDy = -currentPitchDeg * Defaults.OSD_PITCH_PX_PER_DEG
+        // Roll angle and vertical group shift come from the SHARED OsdLayoutMath
+        // (same smoothed attitude the camera uses); the headless direction
+        // assertions pin the exact left/right and up/down screen directions there.
+        val roll = dev.fpv.flight.OsdLayoutMath.rollRad(flight.attitude)
+        val groupDy = dev.fpv.flight.OsdLayoutMath.groupDyPx(flight.attitude).toFloat()
 
         val showHorizon = el(OsdLayout.ARTIFICIAL_HORIZON)?.enabled == true
         val showSidebars = el(OsdLayout.HORIZON_SIDEBARS)?.enabled == true

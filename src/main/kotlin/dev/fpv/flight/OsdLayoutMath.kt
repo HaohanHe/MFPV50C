@@ -20,7 +20,16 @@ import kotlin.math.atan2
 
 object OsdLayoutMath {
 
-    /** Roll angle (rad) of the horizon group for this attitude (same convention as camera). */
+    /**
+     * Roll angle (rad) of the horizon group for this attitude, same convention as
+     * the camera. Positive = right roll. Sign pinned headless: a right-roll command
+     * (ch.roll=+1) drives the plant to bodyUp.x>0, and JOML Matrix3x2f rotates the
+     * horizon line so a POSITIVE group angle puts the left endpoint higher on
+     * screen (smaller y) than the right — i.e. right roll -> left-high/right-low,
+     * matching the FPV picture. (An intermediate cloud edit wrongly negated this;
+     * the empirical FC-driven headless check caught and reverted it.)
+     */
+    @JvmStatic
     fun rollRad(attitude: Quaternionf): Float {
         val inv = Quaternionf(attitude).conjugate()
         val bodyUp = Vector3f(0f, 1f, 0f).rotate(inv)
@@ -28,6 +37,7 @@ object OsdLayoutMath {
     }
 
     /** Pitch (deg, +nose down) for this attitude. */
+    @JvmStatic
     fun pitchDeg(attitude: Quaternionf): Float {
         val inv = Quaternionf(attitude).conjugate()
         val bodyFwd = Vector3f(0f, 0f, -1f).rotate(inv)
@@ -38,6 +48,7 @@ object OsdLayoutMath {
      * Vertical group shift (pixels): nose-down pitches the view down so the level
      * horizon rises. Integer-rounded so identical pitch -> identical pixel row.
      */
+    @JvmStatic
     fun groupDyPx(attitude: Quaternionf): Int =
         Math.round(-pitchDeg(attitude) * Defaults.OSD_PITCH_PX_PER_DEG)
 
@@ -54,5 +65,26 @@ object OsdLayoutMath {
             }
         }
         return rows.toIntArray()
+    }
+
+    /**
+     * Screen-space vertical offsets (pixels, +down = lower on screen) of the two
+     * endpoints of the artificial-horizon line, after the EXACT same transform
+     * the on-screen instrument applies: translate to (cx, cy+groupDy), then
+     * rotate by [rollRad]. [halfWidthPx] is the local half-length of the line
+     * (left endpoint = -half, right endpoint = +half). Uses JOML Matrix3x2f, the
+     * same matrix stack GuiGraphics.pose() returns, so the headless direction
+     * check matches what a pilot sees. Returns [leftY, rightY].
+     */
+    @JvmStatic
+    fun horizonEndpointScreenDy(attitude: Quaternionf, halfWidthPx: Float): FloatArray {
+        val roll = rollRad(attitude)
+        val dy = groupDyPx(attitude).toFloat()
+        val m = org.joml.Matrix3x2f()
+        m.translate(0f, dy)
+        m.rotate(roll)
+        val left = m.transformPosition(org.joml.Vector2f(-halfWidthPx, 0f), org.joml.Vector2f())
+        val right = m.transformPosition(org.joml.Vector2f(halfWidthPx, 0f), org.joml.Vector2f())
+        return floatArrayOf(left.y, right.y)
     }
 }
