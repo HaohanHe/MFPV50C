@@ -29,9 +29,12 @@ object RaceManager {
     var track: TrackDoc = TrackDoc()
         private set
 
-    // ---- heat state ----
+    // ---- heat state (delegated to the pure, headless-tested RaceTimingCore) ----
     var phase: RacePhase = RacePhase.IDLE
         private set
+
+    /** Pure timing core; single source of truth for gate order / laps / penalties / boost. */
+    private var core: RaceTimingCore? = null
 
     private var clockStarted = false
     private var roundStartNanos = 0L
@@ -76,6 +79,29 @@ object RaceManager {
      * calibration required.
      */
     fun racingEnabled(): Boolean = race()?.raceEnabled == true
+
+    /** Client-side virtual boost active this frame (BOOST gate crossed recently). Local-only. */
+    fun boostActive(): Boolean = core?.boostActive() == true
+    fun boostMultiplier(): Double = BOOST_MULTIPLIER + 0.0
+
+    private fun buildCore(): RaceTimingCore? {
+        if (track.gates.isEmpty()) return null
+        val cg = track.gates.map { g ->
+            val n = g.forward()
+            CoreGate(
+                g.x, g.y, g.z, n.x, n.y, n.z,
+                g.width / 2.0, g.height / 2.0,
+                g.gateShape() == GateShape.RING, g.gateShape() == GateShape.BOOST,
+            )
+        }
+        return RaceTimingCore(
+            cg,
+            requiredLaps = requiredLaps(),
+            timeLimitNs = timeLimitNs(),
+            debounceNs = (race()?.minLapDebounceMs ?: 2000L) * 1_000_000L,
+            now = { System.nanoTime() },
+        )
+    }
 
     private fun requiredLaps(): Int = race()?.requiredLaps ?: F9URules.REQUIRED_LAPS
     private fun timeLimitNs(): Long =
@@ -144,6 +170,20 @@ object RaceManager {
             (phase == RacePhase.ARMED || phase == RacePhase.FLYING)
         ) {
             detectCrossing(prev, eye)
+            // Drive the pure timing core (boost expiry, jump-start, missed-gate flags).
+            core?.step(eye.x, eye.y, eye.z)
+            when (core?.lastEvent) {
+                CoreEvent.JUMP_START -> {
+                    penaltyMs += (race()?.penaltySec ?: F9URules.ABANDON_PENALTY_SEC).toLong() * 1000L
+                    flashText = "+30s JUMP START"
+                    flashUntil = System.currentTimeMillis() + 1500L
+                }
+                CoreEvent.MISSED -> {
+                    flashText = "MISSED GATE - CORRECT"
+                    flashUntil = System.currentTimeMillis() + 1500L
+                }
+                else -> {}
+            }
         }
         lastPos = eye
 
@@ -290,6 +330,8 @@ object RaceManager {
         lastCrossGate = -1
         recording.clear()
         splitsMs = MutableList(gates.size) { 0L }
+        // Build the pure timing core and arm it (single source of truth).
+        core = buildCore()?.also { it.arm() }
         // START_SIGNAL mode: clock runs immediately.
         if (race()?.timingTrigger == "START_SIGNAL" && gates.isNotEmpty()) {
             clockStarted = true

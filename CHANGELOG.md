@@ -8,6 +8,14 @@ revision. No formal GitHub Release is published until real-hardware acceptance.
 
 ## [Unreleased] — OSD refactor: data-driven element registry
 
+### Changed (race: RaceManager now delegates to the pure timing core)
+- `RaceManager.startHeat()` builds a `RaceTimingCore` from the track gates and arms it;
+  `onFrame()` feeds eye positions to `core.step(...)`. Core now the single source for boost
+  expiry, jump-start (+30s flash), and MISSED GATE — CORRECT flash. `boostActive()` /
+  `boostMultiplier()` exposed for the local translational link (client-side; no remote packets).
+- LineHelper bearing + live-gap pure functions already headless-tested; on-screen arrow/gap =
+  existing HUD, rendering visuals 需真机.
+
 ### Added (race pure core: double geometry + injectable-clock timing + boost)
 - **`race/RaceCore.kt`**: `GateGeo` double-precision segment-plane intersection (no MC Vec3) with
   forward-only direction (+1 hit / -1 wrong-way / 0 miss) and RECT/RING aperture;
