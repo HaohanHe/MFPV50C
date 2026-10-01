@@ -24,6 +24,9 @@ import kotlin.math.exp
 import kotlin.math.sign
 import kotlin.math.sqrt
 
+/** Upper clamp for the client-side BOOST gate thrust multiplier. */
+private const val BOOST_MAX_SCALE = 1.5f
+
 class TranslationalDynamics(val af: AirframeProfile) {
 
     companion object {
@@ -52,6 +55,7 @@ class TranslationalDynamics(val af: AirframeProfile) {
         derate: Float,
         reversible3D: Boolean,
         threeDDeadband: Float,
+        boostScale: Float = 1f,
     ): Vector3f {
         var t = tIn
         if (reversible3D && abs(t) < threeDDeadband) t = 0f
@@ -65,7 +69,8 @@ class TranslationalDynamics(val af: AirframeProfile) {
         // Thrust magnitude: totalThrust * groundEffect * battery derate.
         val gf = groundFactor(aglBlocks)
         val mass = af.massKg.coerceAtLeast(1e-3f)
-        val thrustAccelMps2 = af.totalThrustN(tMag) * gf * derate.coerceIn(0f, 1.5f) / mass
+        val thrustAccelMps2 = af.totalThrustN(tMag) * gf * derate.coerceIn(0f, 1.5f) *
+            boostScale.coerceIn(1f, BOOST_MAX_SCALE) / mass
         val thrustDelta = thrustAccelMps2 * TICK_ACCEL * dir
 
         var dx = up.x() * thrustDelta

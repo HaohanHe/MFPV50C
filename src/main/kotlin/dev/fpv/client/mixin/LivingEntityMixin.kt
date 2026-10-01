@@ -69,10 +69,15 @@ class LivingEntityMixin {
         FpvClient.flight.setTranslationState(vy.toFloat(), horiz.toFloat())
         val totalDerate = derate * FpvClient.flight.propwashThrustScale
 
+        // Client-side BOOST gate: only the local single-player path (this travel override)
+        // injects extra thrust. On a remote server we never take this branch, so boostScale
+        // stays 1f there = safe no-op (no fabricated velocity packets).
+        val boostScale = if (dev.fpv.race.RaceManager.boostActive())
+            dev.fpv.race.RaceManager.boostMultiplier().toFloat() else 1f
         val d = dyn.step(
             FpvClient.flight.attitude, FpvClient.throttle,
             vx, vy, vz, agl, totalDerate,
-            cfg.reversible3D, cfg.threeDThrottleDeadband,
+            cfg.reversible3D, cfg.threeDThrottleDeadband, boostScale,
         )
         vx += d.x().toDouble()
         vy += d.y().toDouble()

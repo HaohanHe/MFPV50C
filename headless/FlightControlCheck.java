@@ -112,8 +112,8 @@ public class FlightControlCheck {
     FpvConfig cfg = new FpvConfig();
     TranslationalDynamics td = new TranslationalDynamics(cfg.activeAirframe());
     Quaternionf level = new Quaternionf();
-    Vector3f base = td.step(level, 0f, 0.0, 0.0, 0.0, -1f, 1f, false, 0.05f);
-    Vector3f mov  = td.step(level, 0f, (double) vx, (double) vy, (double) vz, -1f, 1f, false, 0.05f);
+    Vector3f base = td.step(level, 0f, 0.0, 0.0, 0.0, -1f, 1f, false, 0.05f, 1.0f);
+    Vector3f mov  = td.step(level, 0f, (double) vx, (double) vy, (double) vz, -1f, 1f, false, 0.05f, 1.0f);
     return new float[]{ mov.x - base.x, mov.y - base.y, mov.z - base.z };
   }
 
@@ -385,7 +385,7 @@ public class FlightControlCheck {
       // pitch the nose down 15 deg so thrust vector points forward+down (accelerate).
       Quaternionf fwd = new Quaternionf().rotateX((float) Math.toRadians(15));
       for (int i = 0; i < 400; i++) {
-        Vector3f d = td.step(fwd, thr, vx, vy, vz, 100f, 1f, false, 0.05f);
+        Vector3f d = td.step(fwd, thr, vx, vy, vz, 100f, 1f, false, 0.05f, 1.0f);
         vx += d.x(); vy += d.y(); vz += d.z();
         ser[i] = Math.sqrt(vx*vx+vy*vy+vz*vz);
       }
@@ -436,29 +436,29 @@ public class FlightControlCheck {
       // hover: level, hover throttle -> vy converges ~0, position stable
       double vx=0,vy=0,vz=0; double px=0,py=0,pz=0;
       for (int i = 0; i < 600; i++) {
-        Vector3f d = td.step(new Quaternionf(), hover, vx, vy, vz, 100f, 1f, false, 0.05f);
+        Vector3f d = td.step(new Quaternionf(), hover, vx, vy, vz, 100f, 1f, false, 0.05f, 1.0f);
         vx+=d.x(); vy+=d.y(); vz+=d.z(); px+=vx; py+=vy; pz+=vz;
       }
       System.out.printf("    hover: vy=%.4f b/t, |pos drift|=%.3f blocks%n", vy, Math.sqrt(px*px+py*py+pz*pz));
       check("hover converges to ~0 vertical speed (|vy|<0.01)", Math.abs(vy) < 0.01, "vy=" + String.format("%.4f", vy));
       // vertical climb: throttle above hover
       vx=vy=vz=0;
-      for (int i=0;i<200;i++){ Vector3f d=td.step(new Quaternionf(),1f,vx,vy,vz,100f,1f,false,0.05f); vx+=d.x();vy+=d.y();vz+=d.z(); }
+      for (int i=0;i<200;i++){ Vector3f d=td.step(new Quaternionf(),1f,vx,vy,vz,100f,1f,false,0.05f,1.0f); vx+=d.x();vy+=d.y();vz+=d.z(); }
       System.out.printf("    full throttle vertical climb: vy=%.3f b/t%n", vy);
       check("full throttle climbs vertically (vy>0.05)", vy > 0.05, "vy=" + String.format("%.3f", vy));
       // no stall: at zero airspeed, body-up lift still accelerates (full throttle).
       vx=vy=vz=0;
-      Vector3f d0 = td.step(new Quaternionf(), 1f, 0,0,0, 100f,1f,false,0.05f);
+      Vector3f d0 = td.step(new Quaternionf(), 1f, 0,0,0, 100f,1f,false,0.05f,1.0f);
       check("zero airspeed still has active body-up thrust (no stall)", d0.y() > 0.01, "dy=" + String.format("%.4f", d0.y()));
       // on-spot yaw: rotate heading, position should not translate horizontally
       Quaternionf yaw = new Quaternionf().rotateY((float)Math.toRadians(45));
       vx=vy=vz=0; double hx=0,hz=0;
-      for (int i=0;i<200;i++){ Vector3f d=td.step(yaw,hover,vx,vy,vz,100f,1f,false,0.05f); vx+=d.x();vy+=d.y();vz+=d.z(); hx+=vx; hz+=vz; }
+      for (int i=0;i<200;i++){ Vector3f d=td.step(yaw,hover,vx,vy,vz,100f,1f,false,0.05f,1.0f); vx+=d.x();vy+=d.y();vz+=d.z(); hx+=vx; hz+=vz; }
       check("on-spot yaw: no horizontal translation (|dxz|<0.1)", Math.sqrt(hx*hx+hz*hz) < 0.1, "dxz=" + String.format("%.3f", Math.sqrt(hx*hx+hz*hz)));
       // pitch vector: pitch tilt -> horizontal forward speed builds
       Quaternionf pitch = new Quaternionf().rotateX((float)Math.toRadians(20));
       vx=vy=vz=0;
-      for (int i=0;i<200;i++){ Vector3f d=td.step(pitch,hover,vx,vy,vz,100f,1f,false,0.05f); vx+=d.x();vy+=d.y();vz+=d.z(); }
+      for (int i=0;i<200;i++){ Vector3f d=td.step(pitch,hover,vx,vy,vz,100f,1f,false,0.05f,1.0f); vx+=d.x();vy+=d.y();vz+=d.z(); }
       check("pitch thrust-vector builds horizontal speed (|vz|>0.1)", Math.abs(vz) > 0.1, "vz=" + String.format("%.3f", vz));
     }
 
@@ -764,9 +764,9 @@ public class FlightControlCheck {
       // (a) Vertical thrust sign via TranslationalDynamics (level attitude, far from ground).
       TranslationalDynamics td = new TranslationalDynamics(cfg.activeAirframe());
       Quaternionf level = new Quaternionf();
-      float dyUp   = td.step(level,  0.5f, 0,0,0, 100f, 1f, true, dead).y();
-      float dyDown = td.step(level, -0.5f, 0,0,0, 100f, 1f, true, dead).y();
-      float dyMid  = td.step(level,  0.02f,0,0,0, 100f, 1f, true, dead).y(); // inside deadband
+      float dyUp   = td.step(level,  0.5f, 0,0,0, 100f, 1f, true, dead, 1.0f).y();
+      float dyDown = td.step(level, -0.5f, 0,0,0, 100f, 1f, true, dead, 1.0f).y();
+      float dyMid  = td.step(level,  0.02f,0,0,0, 100f, 1f, true, dead, 1.0f).y(); // inside deadband
       System.out.printf("    vertical accel  up=%.4f  reverse=%.4f  mid(deadband)=%.4f%n", dyUp, dyDown, dyMid);
       check("3D positive throttle pushes UP", dyUp > dyDown, "up="+String.format("%.4f",dyUp));
       check("3D negative throttle pushes DOWN (thrust reversed)", dyDown < dyUp, "rev="+String.format("%.4f",dyDown));
@@ -1579,6 +1579,22 @@ public class FlightControlCheck {
       check("base scale = 1.0", Math.abs(base-1.0)<1e-9, ""+base);
       check("boost scale = 1.5", Math.abs(boost-1.5)<1e-9, ""+boost);
       check("boost gain > baseline", boost>base, "");
+    }
+
+    // ---------- 46. BOOST scale actually drives translational thrust ----------
+    System.out.println("\n[46] boostScale wired into TranslationalDynamics");
+    {
+      FpvConfig cfg = new FpvConfig();
+      TranslationalDynamics td = new TranslationalDynamics(cfg.activeAirframe());
+      Quaternionf level = new Quaternionf();
+      // Full throttle, level attitude, still: vertical thrust delta.
+      Vector3f d1  = td.step(level, 1f, 0.0,0.0,0.0, -1f, 1f, false, 0.05f, 1f);
+      Vector3f dB  = td.step(level, 1f, 0.0,0.0,0.0, -1f, 1f, false, 0.05f, 1.5f);
+      double up1 = d1.y(), upB = dB.y();
+      System.out.printf("    thrust accel up: scale1=%.4f scale1.5=%.4f ratio=%.3f%n", up1, upB, upB/up1);
+      check("boost yields more vertical accel", upB > up1, upB+">"+up1);
+      check("ratio ~1.5 thrust口径 (gravity-offset)", upB > up1*1.3 && upB < up1*1.7, ""+(upB/up1));
+      check("no NaN", !Float.isNaN(dB.y()), "");
     }
 
     System.out.println("\n========================================");
