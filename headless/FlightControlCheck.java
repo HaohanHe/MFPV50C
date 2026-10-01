@@ -1621,6 +1621,31 @@ public class FlightControlCheck {
       check("BAT_LOW throttled bounded", low>=2 && low<=6, ""+low);
     }
 
+    // ---------- 48. Thrust envelope: idle net lift, mid-throttle continuity, spool-down ----------
+    System.out.println("\n[48] thrust envelope (窜天/中油诊断)");
+    {
+      FpvConfig cfg = new FpvConfig();
+      var af = cfg.activeAirframe();
+      float hoverT = af.effectiveHoverThrottle();
+      float idleT = af.getMinThrottle();
+      // thrustLaw is monotonic quadratic: compare thrust at idle vs hover (N ratio).
+      float idleThrust = af.totalThrustN(idleT);
+      float hoverThrust = af.totalThrustN(hoverT);
+      System.out.printf("    hoverThrottle=%.3f idleT=%.2f thrust(idle)/thrust(hover)=%.3f%n",
+          hoverT, idleT, idleThrust/hoverThrust);
+      check("idle thrust well below hover (not lifting off)", idleThrust/hoverThrust < 0.6f, ""+(idleThrust/hoverThrust));
+      // Thrust monotonic/continuous across throttle range.
+      float prev = 0f; boolean cont = true;
+      for (float t=0f; t<=1.001f; t+=0.05f){ float th = af.totalThrustN(t); if (th < prev - 0.01f) cont=false; prev = th; }
+      check("thrust monotonic/continuous in throttle", cont, "");
+      // Spool-down: zero throttle -> gravity dominates -> falls.
+      TranslationalDynamics td = new TranslationalDynamics(cfg.activeAirframe());
+      Quaternionf level = new Quaternionf();
+      Vector3f d0 = td.step(level, 0f, 0.0,0.0,0.0, -1f, 1f, false, 0.05f, 1f);
+      System.out.printf("    zero-throttle step y=%.4f (negative=falls)%n", d0.y());
+      check("zero throttle falls (no runaway up)", d0.y() < 0f, ""+d0.y());
+    }
+
     System.out.println("\n========================================");
     System.out.println(failures == 0 ? "ALL TESTS PASS" : ("FAILURES: " + failures));
     System.exit(failures == 0 ? 0 : 1);
