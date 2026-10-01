@@ -8,6 +8,22 @@ revision. No formal GitHub Release is published until real-hardware acceptance.
 
 ## [Unreleased] — OSD refactor: data-driven element registry
 
+### Added (B2 batch elements, real telemetry)
+- **Core flight telemetry widgets**: vario (vertical speed m/s·f/s with ▲/▼ arrow), numeric heading
+  (0–359 + compass letter N/NE/E…), true ground speed (body horizontal speed, replacing player-movement
+  estimate), altitude (player Y), plus Uncrashed-style speed & altitude side **bars** and a heading
+  **compass ladder** (N/E/S/W ticks + centre marker).
+- **Power/efficiency/estimators**: power W = vbat×currentA, remaining flight time ETE = battery%/
+  discharge-rate estimate, ESC RPM = |mixer|×ESC_MAX_RPM (model-derived), efficiency km/h·A.
+- **Race & diagnostics**: 4 per-motor % bars (signed in 3D, reverse fills downward), second timer,
+  current+best lap (reuses `RaceManager`), home arrow+distance (arm-point derived; hidden until arm),
+  craft/pilot name static text.
+- All new elements live in `OsdElements.REGISTRY` with unit/precision/default position; addable &
+  independently toggleable in the OSD editor, metric/imperial applied, layout round-trips via
+  `AtomicFiles`. Model-derived items are flagged in the label (*).
+- No fake data: GPS lat/lon/satellites, ESC/core temp, RTC, independent airspeed, LIDAR, navigation
+  map and DJI SYS family remain unimplemented (no real source).
+
 ### Added
 - **OSD element registry** (`flight/OsdModel.kt`): `OsdElements.REGISTRY` declares every element by
   id / zh+en label / renderer type (TEXT·BAR·LADDER·GAUGE·ICON·HORIZON·BANNER) / measured quantity /

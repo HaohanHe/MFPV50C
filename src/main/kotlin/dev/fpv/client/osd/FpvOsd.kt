@@ -27,6 +27,12 @@ import kotlin.math.atan2
 
 object FpvOsd {
 
+    // Home = arm position tracking (rising edge of armed).
+    private var wasArmed = false
+    private var hasHome = false
+    private var homeX = 0f
+    private var homeZ = 0f
+
     private const val GREEN = 0xFF55FF55.toInt()
     private const val GREEN_FILL = 0xFF55FF55.toInt()
     private const val YELLOW = 0xFFFFFF55.toInt()
@@ -104,12 +110,27 @@ object FpvOsd {
         val iv = Quaternionf(flight.attitude).conjugate()
         val bu = Vector3f(0f, 1f, 0f).rotate(iv)
         val bfwd = Vector3f(0f, 0f, -1f).rotate(iv)
+
+        // Home point = arm position (captured on the arm rising edge).
+        val wx = p.x.toFloat(); val wz = p.z.toFloat()
+        if (FpvClient.armed && !wasArmed) { homeX = wx; homeZ = wz; hasHome = true }
+        if (!FpvClient.armed) { wasArmed = false; hasHome = false }
+        wasArmed = FpvClient.armed
+        val homeBearing = if (hasHome) Math.toDegrees(kotlin.math.atan2((wx - homeX).toDouble(), (wz - homeZ).toDouble())).toFloat() else 0f
+        val homeDist = if (hasHome) kotlin.math.hypot((wx - homeX).toDouble(), (wz - homeZ).toDouble()).toFloat() else 0f
+
+        val motorNorm = flight.readMotorNorm()
+        val motorRpm = FloatArray(motorNorm.size) { kotlin.math.abs(motorNorm[it]) * Defaults.ESC_MAX_RPM }
+        val horiz = (flight.transHoriz * 20f).coerceAtLeast(0f)
+        val groundKmh = horiz * dev.fpv.flight.OsdUnit.MPS_TO_KMH
+        val packMah = cfg.activeBattery().packCapacityMah.toFloat().coerceAtLeast(1f)
+        val remHours = if (b.currentA > 0.1f) (b.percent() / 100f) * packMah / 100f / b.currentA else 0f
         val tel = OsdTelemetry(
             rollDeg = Math.toDegrees(atan2(-bu.x, bu.y).toDouble()).toFloat(),
             pitchDeg = Math.toDegrees(asin((-bfwd.y).coerceIn(-1f, 1f).toDouble())).toFloat(),
             targetPitchDeg = flight.targetPitchDeg,
             targetRollDeg = flight.targetRollDeg,
-            groundSpeedMps = (p.deltaMovement.length() * 20.0).toFloat(),
+            groundSpeedMps = horiz,
             vbat = b.vbat,
             perCell = b.perCell(),
             percent = b.percent(),
@@ -125,6 +146,20 @@ object FpvOsd {
             flightTimeSec = FpvClient.flightTimeSec,
             linkFailsafe = FpvClient.link.state == LinkState.FAILSAFE,
             linkHold = FpvClient.link.state == LinkState.HOLD,
+            headingDeg = flight.headingDeg(),
+            hasHome = hasHome,
+            homeBearingDeg = homeBearing,
+            homeDistM = homeDist,
+            varioMps = flight.transVy * 20f,
+            altitudeM = p.getY().toFloat(),
+            motorRpm = motorRpm,
+            mixerOut = motorNorm,
+            lapCurrentMs = dev.fpv.race.RaceManager.currentLapMs(),
+            lapBestMs = dev.fpv.race.RaceManager.bestRoundMs(),
+            remainingTimeSec = remHours * 3600f,
+            efficiency = if (b.currentA > 0.1f) groundKmh / b.currentA else 0f,
+            craftName = cfg.craftName,
+            pilotName = cfg.pilotName,
         )
         val globalUnit = OsdUnit.parse(cfg.osdUnit)
 
@@ -142,7 +177,9 @@ object FpvOsd {
                 }
                 OsdRenderer.BANNER -> drawBanner(ctx, font, e, spec, tel, cx, cy)
                 OsdRenderer.ICON, OsdRenderer.HORIZON -> { /* center group below */ }
-                OsdRenderer.BAR, OsdRenderer.LADDER, OsdRenderer.GAUGE -> { /* reserved */ }
+                OsdRenderer.BAR -> drawBar(ctx, e, spec, tel, globalUnit)
+                OsdRenderer.LADDER -> drawCompassBar(ctx, e, tel, font)
+                OsdRenderer.GAUGE -> { /* reserved */ }
             }
         }
 
@@ -192,6 +229,60 @@ object FpvOsd {
         }
         OsdElements.LQ -> if (tel.lq < 50) RED else if (tel.lq < 80) YELLOW else GREEN
         else -> spec.color.argb()
+    }
+
+    /**
+     * BAR widgets: speed / altitude side bars (Uncrashed-style) and the 4 motor-diag
+     * bars. Vertical fill proportional to the real telemetry value.
+     */
+    private fun drawBar(
+        ctx: GuiGraphics, e: OsdElement, spec: OsdElementSpec, tel: OsdTelemetry, unit: OsdUnit,
+    ) {
+        val W = 6; val H = 60
+        when (spec.id) {
+            OsdElements.SPEED_BAR -> {
+                val v = OsdUnit.speedDisplay(tel.groundSpeedMps, unit)
+                val f = (v / 120f).coerceIn(0f, 1f)
+                ctx.fill(e.x, e.y, e.x + W, e.y + H, 0x40FFFFFF.toInt())
+                ctx.fill(e.x, e.y + H - (f * H).toInt(), e.x + W, e.y + H, GREEN_FILL)
+            }
+            OsdElements.ALTITUDE_BAR -> {
+                val v = OsdUnit.distanceDisplay(tel.altitudeM, unit)
+                val f = (v / 50f).coerceIn(0f, 1f)
+                ctx.fill(e.x, e.y, e.x + W, e.y + H, 0x40FFFFFF.toInt())
+                ctx.fill(e.x, e.y + H - (f * H).toInt(), e.x + W, e.y + H, CYAN)
+            }
+            OsdElements.MOTOR_DIAG -> {
+                // 4 vertical bars, signed (3D reverse fills downward).
+                for (i in tel.mixerOut.indices) {
+                    val m = tel.mixerOut[i].coerceIn(-1f, 1f)
+                    val bx = e.x + i * 8
+                    val mid = e.y + H / 2
+                    ctx.fill(bx, e.y, bx + 6, e.y + H, 0x40FFFFFF.toInt())
+                    if (m >= 0f) ctx.fill(bx, mid - (m * H / 2).toInt(), bx + 6, mid, GREEN_FILL)
+                    else ctx.fill(bx, mid, bx + 6, mid + (-m * H / 2).toInt(), YELLOW_FILL)
+                }
+            }
+        }
+    }
+
+    /** Compass ladder: N/E/S/W ticks + a centre marker on the current heading. */
+    private fun drawCompassBar(
+        ctx: GuiGraphics, e: OsdElement, tel: OsdTelemetry, font: net.minecraft.client.gui.Font,
+    ) {
+        val W = 120; val H = 12
+        val h = tel.headingDeg
+        ctx.fill(e.x, e.y, e.x + W, e.y + H, 0x40000000.toInt())
+        for (d in 0..11) {
+            val deg = d * 30
+            val rel = ((deg - h) % 360 + 360) % 360
+            if (rel > 90 && rel < 270) continue
+            val px = (e.x + W / 2 - (rel - 180) * (W / 180)).toInt()
+            val label = OsdElements.compassLetter(deg.toFloat())
+            ctx.drawString(font, label, px - 3, e.y + 2, CYAN, false)
+        }
+        // centre marker
+        ctx.fill(e.x + W / 2 - 1, e.y - 2, e.x + W / 2 + 1, e.y + H + 2, YELLOW_FILL)
     }
 
     /** Centered banner elements: mode banner + transient center warning. */

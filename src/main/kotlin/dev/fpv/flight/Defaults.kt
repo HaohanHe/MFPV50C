@@ -220,6 +220,13 @@ object Defaults {
     /** Default global OSD units: "METRIC" (km/h, m, mAh) or "IMPERIAL" (mph, ft). */
     const val OSD_UNIT_DEFAULT = "METRIC"
 
+    /** Static OSD text labels. */
+    const val CRAFT_NAME_DEFAULT = ""
+    const val PILOT_NAME_DEFAULT = ""
+
+    /** Model-derived ESC max rpm (full normalized motor = this rpm; OSD ESC_RPM). */
+    const val ESC_MAX_RPM = 30000f
+
     // ---- OSD artificial horizon / pitch ladder (synthetic instrument) ----
     /** Vertical pixels per degree of pitch for the horizon group. */
     const val OSD_PITCH_PX_PER_DEG = 2.0f

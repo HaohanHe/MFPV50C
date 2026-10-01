@@ -100,6 +100,12 @@ class FlightController(val cfg: FpvConfig = FpvConfig()) {
     @JvmField
     var targetPitchDeg = 0f
 
+    /** OSD: current heading 0-359 deg (world yaw). */
+    fun headingDeg(): Float = currentYawDeg()
+
+    /** OSD: signed normalized motor outputs [-1,1] (motor-diag / rpm source). */
+    fun readMotorNorm(): FloatArray = realDynamics.motorNorm()
+
     private val angle = AngleController()
     private var modeSwitchWasHigh = false
 

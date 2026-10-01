@@ -53,6 +53,9 @@ class RealDynamics(
         wx = 0f; wy = 0f; wz = 0f
     }
 
+    /** Signed normalized motor speeds m ∈ [-1,1] (OSD motor-diag / rpm source). Copy. */
+    fun motorNorm(): FloatArray = motor.copyOf()
+
     /** Latest actual body rates, dps [pitch,roll,yaw] (read out after [step]). */
     val ratesDps: FloatArray
         get() = floatArrayOf(

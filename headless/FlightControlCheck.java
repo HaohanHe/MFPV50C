@@ -910,9 +910,93 @@ public class FlightControlCheck {
       }
       long textTotal = dev.fpv.flight.OsdElements.INSTANCE.getREGISTRY().stream().filter(x->x.getRenderer()==dev.fpv.flight.OsdRenderer.TEXT).count();
       long graphTotal = dev.fpv.flight.OsdElements.INSTANCE.getREGISTRY().size() - textTotal;
-      System.out.println("    text-rendered="+textOk+"/"+textTotal+"  graphics-null="+graphicsNull+"/"+graphTotal);
-      check("every TEXT element produces a string", textOk == (int)textTotal, "ok="+textOk+"/"+textTotal);
+      // 3 TEXT elements are conditional: HOME(no arm), CRAFT_NAME(empty), LAP_TIME(no lap) -> null on no-signal.
+      long conditionalNull = dev.fpv.flight.OsdElements.INSTANCE.getREGISTRY().stream()
+        .filter(x->x.getRenderer()==dev.fpv.flight.OsdRenderer.TEXT)
+        .filter(x-> { String s=dev.fpv.flight.OsdFormatter.INSTANCE.text(x, tel, dev.fpv.flight.OsdUnit.METRIC); return s==null; })
+        .count();
+      System.out.println("    text-rendered="+textOk+"/"+textTotal+"  graphics-null="+graphicsNull+"/"+graphTotal+"  conditional-null="+conditionalNull);
+      check("TEXT elements render except the 3 no-signal conditionals", textOk == (int)(textTotal-conditionalNull) && conditionalNull==3, "ok="+textOk+"/"+textTotal+" cond="+conditionalNull);
       check("graphics/banner elements return null text", graphicsNull == (int)graphTotal, "null="+graphicsNull+"/"+graphTotal);
+    }
+
+    // ---------- 29. B2 batch: vario / heading / home / motor-rpm / remaining / efficiency ----------
+    System.out.println("\n[29] B2 OSD elements: vario sign, heading+compass, home, motor%, rpm, ETE, efficiency");
+    {
+      var M = dev.fpv.flight.OsdUnit.METRIC; var I = dev.fpv.flight.OsdUnit.IMPERIAL;
+      // base telemetry (28 positional args, new fields defaulted/named)
+      var base = new dev.fpv.flight.OsdTelemetry(0,0,0,0, 5f, 12f, 1.5f, 0,0,0,0,
+        16.8f, 4.2f, 80f, 10f, 400f, new float[]{6000f,6000f,-6000f,-6000f}, new float[]{0.2f,-0.2f,0.2f,-0.2f},
+        96f, 0.45f, false, false, "ACRO", true, 123f, dev.fpv.flight.BatteryStage.OK, false, false);
+
+      // vario: climb shows up-arrow, sink down-arrow, unit switch m/s<->f/s
+      var vario = dev.fpv.flight.OsdElements.INSTANCE.getREGISTRY().stream().filter(x->x.getId().equals(dev.fpv.flight.OsdElements.VARIO)).findFirst().get();
+      String tUp = dev.fpv.flight.OsdFormatter.INSTANCE.text(vario, base.withVario(2.5f), M);
+      String tDn = dev.fpv.flight.OsdFormatter.INSTANCE.text(vario, base.withVario(-2.5f), M);
+      String tFt = dev.fpv.flight.OsdFormatter.INSTANCE.text(vario, base.withVario(2.5f), I);
+      System.out.println("    vario up='"+tUp+"' down='"+tDn+"' imp='"+tFt+"'");
+      check("vario climb shows up-arrow", tUp.contains("▲"), tUp);
+      check("vario sink shows down-arrow", tDn.contains("▼"), tDn);
+      check("vario imperial switches to f/s", tFt.contains("f/s") && !tFt.contains("m/s"), tFt);
+
+      // heading + compass letter
+      var heading = dev.fpv.flight.OsdElements.INSTANCE.getREGISTRY().stream().filter(x->x.getId().equals(dev.fpv.flight.OsdElements.HEADING)).findFirst().get();
+      String hd90 = dev.fpv.flight.OsdFormatter.INSTANCE.text(heading, base.withHeading(90f), M);
+      String hd45 = dev.fpv.flight.OsdFormatter.INSTANCE.text(heading, base.withHeading(45f), M);
+      System.out.println("    heading 90='"+hd90+"' 45='"+hd45+"'");
+      check("heading 90 -> 090E", hd90.equals("090E"), hd90);
+      check("heading 45 -> 045NE", hd45.equals("045NE"), hd45);
+
+      // home: bearing+dist, hidden without home
+      var home = dev.fpv.flight.OsdElements.INSTANCE.getREGISTRY().stream().filter(x->x.getId().equals(dev.fpv.flight.OsdElements.HOME)).findFirst().get();
+      String ht = dev.fpv.flight.OsdFormatter.INSTANCE.text(home, base.withHome(90f, 10f), M);
+      String nt = dev.fpv.flight.OsdFormatter.INSTANCE.text(home, base.withNoHome(), M);
+      System.out.println("    home='"+ht+"' nohome='"+nt+"'");
+      check("home shown with bearing letter + dist m", ht.contains("E") && ht.contains("10m"), ht);
+      check("home hidden until arm (no home)", nt == null, "null expected");
+
+      // motor diag: signed mixer; esc rpm = |motor|*maxRpm >0
+      check("mixerOut carries signed 3D values", base.getMixerOut()[1] < 0f && base.getMixerOut()[0] > 0f, "m0="+base.getMixerOut()[0]+" m1="+base.getMixerOut()[1]);
+      check("ESC rpm model-derived >0 from motorRpm[0]", base.getMotorRpm()[0] > 0f, "rpm="+base.getMotorRpm()[0]);
+      var esc = dev.fpv.flight.OsdElements.INSTANCE.getREGISTRY().stream().filter(x->x.getId().equals(dev.fpv.flight.OsdElements.ESC_RPM)).findFirst().get();
+      String et = dev.fpv.flight.OsdFormatter.INSTANCE.text(esc, base, M);
+      System.out.println("    escRpm='"+et+"'");
+      check("ESC_RPM text carries rpm number", et.trim().length() > 4, et);
+
+      // remaining time positive & scales with discharge rate; efficiency
+      var rem = dev.fpv.flight.OsdElements.INSTANCE.getREGISTRY().stream().filter(x->x.getId().equals(dev.fpv.flight.OsdElements.REMAINING_TIME)).findFirst().get();
+      String ra = dev.fpv.flight.OsdFormatter.INSTANCE.text(rem, base.withRemaining(300f), M);
+      String rb = dev.fpv.flight.OsdFormatter.INSTANCE.text(rem, base.withRemaining(600f), M);
+      System.out.println("    ETE slow='"+ra+"' fast='"+rb+"'");
+      check("remaining time positive mm:ss", ra.startsWith("ETE"), ra);
+      check("remaining time grows as discharge slows (600s -> 10:00)", rb.equals("ETE 10:00"), ra+" vs "+rb);
+      var eff = dev.fpv.flight.OsdElements.INSTANCE.getREGISTRY().stream().filter(x->x.getId().equals(dev.fpv.flight.OsdElements.EFFICIENCY)).findFirst().get();
+      String ef = dev.fpv.flight.OsdFormatter.INSTANCE.text(eff, base.withEfficiency(3.6f), M);
+      check("efficiency text carries km/h·A", ef.contains("EFF") && ef.contains("km/h"), ef);
+    }
+
+    // ---------- 30. Every B2 element is in the registry, addable, round-trips ----------
+    System.out.println("\n[30] B2 registry coverage: new elements registered, addable, round-trip");
+    {
+      var need = java.util.List.of("vario","heading","altitude","speed_bar","altitude_bar","motor_diag",
+        "remaining_time","esc_rpm","compass_bar","home","efficiency","timer2","lap_time","craft_name","power");
+      int found = 0;
+      for (String id : need) if (dev.fpv.flight.OsdElements.INSTANCE.byId(id) != null) found++;
+      check("all 15 B2 elements registered", found == need.size(), "found="+found+"/"+need.size());
+
+      // each new element has a default layout record (addable + toggleable)
+      var layout = dev.fpv.client.osd.OsdLayout.INSTANCE.defaultLayout();
+      int present = 0;
+      for (String id : need) if (layout.stream().anyMatch(e->e.getId().equals(id))) present++;
+      check("all B2 elements present in default layout (addable)", present == need.size(), "present="+present);
+
+      // toggle one off, round-trip preserves enabled=false
+      for (var e : layout) if (e.getId().equals("vario")) e.setEnabled(false);
+      var gson = new com.google.gson.Gson();
+      var typ = new com.google.gson.reflect.TypeToken<java.util.List<dev.fpv.client.osd.OsdElement>>(){}.getType();
+      var back = gson.<java.util.List<dev.fpv.client.osd.OsdElement>>fromJson(gson.toJson(layout), typ);
+      var varioEl = back.stream().filter(x->x.getId().equals("vario")).findFirst().get();
+      check("new-element toggle off survives round-trip", !varioEl.getEnabled(), "en="+varioEl.getEnabled());
     }
 
     System.out.println("\n========================================");

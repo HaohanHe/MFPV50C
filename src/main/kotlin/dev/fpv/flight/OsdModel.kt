@@ -64,7 +64,7 @@ data class OsdElementSpec(
 )
 
 /** Frozen, read-only telemetry snapshot the OSD formats from. Filled by FpvOsd. */
-data class OsdTelemetry(
+data class OsdTelemetry @JvmOverloads constructor(
     val rollDeg: Float = 0f,
     val pitchDeg: Float = 0f,
     val targetRollDeg: Float = 0f,
@@ -98,9 +98,29 @@ data class OsdTelemetry(
     val batteryStage: BatteryStage = BatteryStage.OK,
     val linkFailsafe: Boolean = false,
     val linkHold: Boolean = false,
+    // ---- appended (all defaulted; preserves existing positional construction) ----
+    val headingDeg: Float = 0f,            // 0..359 world yaw
+    val hasHome: Boolean = false,
+    val homeBearingDeg: Float = 0f,         // compass bearing to home
+    val homeDistM: Float = 0f,
+    var lapCurrentMs: Long = 0L,
+    var lapBestMs: Long = 0L,
+    val remainingTimeSec: Float = 0f,       // estimate (percent / discharge rate)
+    val efficiency: Float = 0f,            // km/h per A (model-derived)
+    val craftName: String = "",
+    val pilotName: String = "",
 ) {
     /** Electrical power W = V * A (virtual battery model). */
     val watts: Float get() = vbat * currentA
+
+    // Test-friendly / Java-friendly copy helpers (return a modified snapshot).
+    fun withVario(v: Float): OsdTelemetry = copy(varioMps = v)
+    fun withHeading(h: Float): OsdTelemetry = copy(headingDeg = h)
+    fun withHome(bearing: Float, dist: Float): OsdTelemetry =
+        copy(hasHome = true, homeBearingDeg = bearing, homeDistM = dist)
+    fun withNoHome(): OsdTelemetry = copy(hasHome = false)
+    fun withRemaining(sec: Float): OsdTelemetry = copy(remainingTimeSec = sec)
+    fun withEfficiency(e: Float): OsdTelemetry = copy(efficiency = e)
 }
 
 /** Canonical registry of every OSD element. Add new elements here only. */
@@ -120,8 +140,36 @@ object OsdElements {
     const val ATTITUDE = "attitude"
     const val CURRENT = "current"
     const val MAH_DRAWN = "mah_drawn"
-    const val POWER = "power"               // new: electrical power W (data interface ready)
+    const val POWER = "power"               // electrical power W
     const val CENTER_WARNING = "center_warning"
+
+    // ---- B2 batch (real telemetry; model-derived ones flagged in label/desc) ----
+    const val VARIO = "vario"               // vertical speed m/s(ft/s) + arrow
+    const val HEADING = "heading"           // 0-359 + compass letter
+    const val ALTITUDE = "altitude"         // height m(ft) = world Y
+    const val SPEED_BAR = "speed_bar"       // Uncrashed-style speed side bar
+    const val ALTITUDE_BAR = "altitude_bar" // Uncrashed-style altitude side bar
+    const val MOTOR_DIAG = "motor_diag"     // 4 per-motor % (signed in 3D)
+    const val REMAINING_TIME = "remaining_time" // battery % / discharge rate estimate
+    const val ESC_RPM = "esc_rpm"           // model-derived rpm
+    const val COMPASS_BAR = "compass_bar"   // heading ladder
+    const val HOME = "home"                 // home bearing arrow + distance
+    const val EFFICIENCY = "efficiency"     // km/h per A (model-derived)
+    const val TIMER2 = "timer2"             // second / total timer
+    const val LAP_TIME = "lap_time"         // current + best lap (race)
+    const val CRAFT_NAME = "craft_name"     // static text
+
+    /** Degrees-per-second -> m/s helpers live on [OsdUnit]; compass rose letters. */
+    fun compassLetter(deg: Float): String = when (((deg % 360f) + 360f) % 360f) {
+        in 337.5f..360f, in 0f..22.5f -> "N"
+        in 22.5f..67.5f -> "NE"
+        in 67.5f..112.5f -> "E"
+        in 112.5f..157.5f -> "SE"
+        in 157.5f..202.5f -> "S"
+        in 202.5f..247.5f -> "SW"
+        in 247.5f..292.5f -> "W"
+        else -> "NW"
+    }
 
     val REGISTRY: List<OsdElementSpec> = listOf(
         OsdElementSpec(CROSSHAIR, "准星", "Crosshair", OsdRenderer.ICON, OsdQty.NONE,
@@ -154,7 +202,39 @@ object OsdElements {
             centerAnchored = false, defaultEnabled = false, 8, 104, OsdColor.GREEN),
         OsdElementSpec(POWER, "功率", "Power", OsdRenderer.TEXT, OsdQty.POWER,
             centerAnchored = false, defaultEnabled = false, 8, 116, OsdColor.GREEN),
+        // ---- B2 batch ----
+        OsdElementSpec(VARIO, "垂直速度", "Vario", OsdRenderer.TEXT, OsdQty.VERT_SPEED,
+            centerAnchored = false, defaultEnabled = false, 8, 128, OsdColor.CYAN),
+        OsdElementSpec(HEADING, "航向", "Heading", OsdRenderer.TEXT, OsdQty.ANGLE,
+            centerAnchored = false, defaultEnabled = false, 8, 140, OsdColor.CYAN),
+        OsdElementSpec(ALTITUDE, "高度", "Altitude", OsdRenderer.TEXT, OsdQty.DISTANCE,
+            centerAnchored = false, defaultEnabled = false, 8, 152, OsdColor.CYAN),
+        OsdElementSpec(SPEED_BAR, "速度侧条", "SpeedBar", OsdRenderer.BAR, OsdQty.SPEED,
+            centerAnchored = false, defaultEnabled = false, 4, 4, OsdColor.GREEN),
+        OsdElementSpec(ALTITUDE_BAR, "高度侧条", "AltitudeBar", OsdRenderer.BAR, OsdQty.DISTANCE,
+            centerAnchored = false, defaultEnabled = false, swSide(), 60, OsdColor.CYAN),
+        OsdElementSpec(MOTOR_DIAG, "电机输出", "MotorDiag", OsdRenderer.BAR, OsdQty.PERCENT,
+            centerAnchored = false, defaultEnabled = false, 8, 164, OsdColor.GREEN),
+        OsdElementSpec(REMAINING_TIME, "剩余时间", "RemainTime", OsdRenderer.TEXT, OsdQty.TIME,
+            centerAnchored = false, defaultEnabled = false, 8, 176, OsdColor.YELLOW),
+        OsdElementSpec(ESC_RPM, "电调转速*", "EscRpm", OsdRenderer.TEXT, OsdQty.PERCENT,
+            centerAnchored = false, defaultEnabled = false, 8, 188, OsdColor.GRAY),
+        OsdElementSpec(COMPASS_BAR, "罗盘条", "CompassBar", OsdRenderer.LADDER, OsdQty.ANGLE,
+            centerAnchored = false, defaultEnabled = false, 0, 20, OsdColor.CYAN),
+        OsdElementSpec(HOME, "返航", "Home", OsdRenderer.TEXT, OsdQty.DISTANCE,
+            centerAnchored = false, defaultEnabled = false, 8, 200, OsdColor.GREEN),
+        OsdElementSpec(EFFICIENCY, "效率*", "Efficiency", OsdRenderer.TEXT, OsdQty.TEXT,
+            centerAnchored = false, defaultEnabled = false, 8, 212, OsdColor.GRAY),
+        OsdElementSpec(TIMER2, "计时2", "Timer2", OsdRenderer.TEXT, OsdQty.TIME,
+            centerAnchored = false, defaultEnabled = false, 8, 224, OsdColor.GRAY),
+        OsdElementSpec(LAP_TIME, "圈速", "LapTime", OsdRenderer.TEXT, OsdQty.TIME,
+            centerAnchored = false, defaultEnabled = false, 8, 236, OsdColor.CYAN),
+        OsdElementSpec(CRAFT_NAME, "机型名", "CraftName", OsdRenderer.TEXT, OsdQty.TEXT,
+            centerAnchored = false, defaultEnabled = false, 8, 248, OsdColor.GRAY),
     )
+
+    /** Right-side bar anchor x (guiScaled px); negative = off the right edge. */
+    private fun swSide(): Int = -4
 
     fun byId(id: String): OsdElementSpec? = REGISTRY.firstOrNull { it.id == id }
 }
@@ -191,8 +271,47 @@ object OsdFormatter {
             OsdElements.CURRENT -> String.format("CUR %4.1fA", tel.currentA)
             OsdElements.MAH_DRAWN -> String.format("MAH %4.0f", tel.mAhDrawn)
             OsdElements.POWER -> String.format("PWR %4.0fW", tel.watts)
-            else -> null // ICON / HORIZON / BANNER elements draw via specialised renderers
+            OsdElements.VARIO -> {
+                val arrow = if (tel.varioMps > 0.5f) "▲" else if (tel.varioMps < -0.5f) "▼" else "|"
+                val v = if (unit == OsdUnit.IMPERIAL) tel.varioMps * 196.85f else tel.varioMps
+                val u = if (unit == OsdUnit.IMPERIAL) "f/s" else "m/s"
+                String.format("V+%s %4.1f%s", arrow, v, u)
+            }
+            OsdElements.HEADING ->
+                String.format("%03d%s", ((tel.headingDeg % 360f + 360f) % 360f).toInt(), OsdElements.compassLetter(tel.headingDeg))
+            OsdElements.ALTITUDE -> {
+                val v = OsdUnit.distanceDisplay(tel.altitudeM, unit)
+                String.format("ALT %4.0f%s", v, if (unit == OsdUnit.IMPERIAL) "ft" else "m")
+            }
+            OsdElements.REMAINING_TIME -> {
+                val s = tel.remainingTimeSec.toInt().coerceAtLeast(0)
+                String.format("ETE %d:%02d", s / 60, s % 60)
+            }
+            OsdElements.ESC_RPM -> String.format("RPM %5.0f", tel.motorRpm.let { if (it.isEmpty()) 0f else it[0] })
+            OsdElements.HOME ->
+                if (!tel.hasHome) null
+                else String.format("HOME %s %4.0f%s", OsdElements.compassLetter(tel.homeBearingDeg),
+                    OsdUnit.distanceDisplay(tel.homeDistM, unit), if (unit == OsdUnit.IMPERIAL) "ft" else "m")
+            OsdElements.EFFICIENCY ->
+                String.format("EFF %.1f km/h·A", tel.efficiency)
+            OsdElements.TIMER2 -> {
+                val s = tel.flightTimeSec.toInt()
+                String.format("T2 %d:%02d:%02d", s / 3600, (s / 60) % 60, s % 60)
+            }
+            OsdElements.LAP_TIME -> {
+                if (tel.lapCurrentMs <= 0L) null
+                else String.format("LAP %s", fmtMs(tel.lapCurrentMs))
+            }
+            OsdElements.CRAFT_NAME ->
+                if (tel.craftName.isEmpty()) null else tel.craftName
+            else -> null // ICON / HORIZON / BANNER / BAR / LADDER draw via specialised renderers
         }
+    }
+
+    /** mm:ss.s from milliseconds. */
+    fun fmtMs(ms: Long): String {
+        val t = ms.coerceAtLeast(0)
+        return String.format("%d:%02d.%01d", (t / 60000), (t / 1000) % 60, (t % 1000) / 100)
     }
 
     /** Effective unit for an element: per-element override, else the global unit. */

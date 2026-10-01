@@ -416,6 +416,10 @@ class FpvConfig {
     /** Global OSD unit system: "METRIC" or "IMPERIAL" (per-element override on OsdElement). */
     var osdUnit: String = Defaults.OSD_UNIT_DEFAULT
 
+    /** OSD static text labels. */
+    var craftName: String = Defaults.CRAFT_NAME_DEFAULT
+    var pilotName: String = Defaults.PILOT_NAME_DEFAULT
+
     /** Raw aux axis for heading-adjust (re-center headfree heading); -1 = off. */
     var headAdjustAxis = -1
 
