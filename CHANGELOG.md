@@ -8,6 +8,20 @@ revision. No formal GitHub Release is published until real-hardware acceptance.
 
 ## [Unreleased] — OSD refactor: data-driven element registry
 
+### Added (P-B: cinematic keyframe camera track)
+- **Keyframe camera track** (`replay/CinematicTrack.kt`, clean-room): ordered `(tSec, pos, quat, interp)`
+  keyframes persisted atomically to a `<rec>.cam.json` sidecar (versioned schema, shareable). Position
+  splines: **Catmull-Rom α=0.5 centripetal (default)**, **Cubic Hermite (configurable tension)**, **Linear**;
+  orientation = shortest-arc slerp. Boundary segments clamp to linear so endpoints pass exactly.
+- **Playback integration** (`replay/ReplayManager.kt`): loads the sidecar on replay load; when
+  `trackActive`, `cameraTransform()` samples the spline at the cursor instead of the recorded pose.
+- **Export canvas** (`replay/CinematicExport.kt`): added `4:5` and `1:1` aspects; even-dimension canvas
+  math extracted to a headless-testable `canvasFor()`.
+- **Optional RC overlay mapping** (`replay/StickOverlay.kt`): recorded normalized RC -> joystick
+  position / throttle fill (pure, headless-tested; rendering wiring pending on-screen).
+- headless [32]: spline passes exactly through keyframes, monotonic/non-overshooting, interp switch,
+  slerp midpoint, sidecar round-trip, canvas sizes, RC overlay mapping.
+
 ### Added (P-A: schema-driven flight recorder v2)
 - **`.fpr` format bumped to v2** (`replay/ReplayFile.kt`): per-sample now records four mixer outputs
   (`motor[4]`, signed in 3D), camera FOV/tilt, and sub-frame `phase`; plus a discrete **event block**

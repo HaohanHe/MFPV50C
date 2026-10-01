@@ -212,6 +212,12 @@ public class FlightControlCheck {
     return fc.getSetpointRates()[1]; // roll channel
   }
 
+  private static double trackSampleX(dev.fpv.replay.CinematicTrack track, double t) {
+    var p = new dev.fpv.replay.TrackPose();
+    track.sample(t, p);
+    return p.getX();
+  }
+
   public static void main(String[] a) {
     System.out.println("=== REAL FlightController headless verification (dt=" + DT + "s) ===");
 
@@ -1058,6 +1064,90 @@ public class FlightControlCheck {
       f.sampleAt(0.25, s);
       check("sampleAt interpolated attitude finite", Float.isFinite(s.getQx()) && s.getTSec()>0, "qx="+s.getQx());
       System.out.println("    wrote/read="+f.getCount()+" events="+f.getEvents().size()+" x5="+f.getPx()[5]+" m03="+f.getMotor()[0][3]);
+    }
+
+    // ---------- 32. Cinematic keyframe track: spline through points, interp switch, slerp, sidecar, aspect ----------
+    System.out.println("\n[32] Cinematic track: Catmull-Rom/Linear/Cubic, slerp, sidecar round-trip, canvas");
+    {
+      var track = new dev.fpv.replay.CinematicTrack();
+      // 4 keyframes on a gentle arc: x grows, y dips. CR passes exactly through each keyframe.
+      track.add(new dev.fpv.replay.TrackKeyframe(0.0, 0.0, 0.0, 0.0,  0f,0f,0f,1f, dev.fpv.replay.TrackInterp.CATMULL_ROM));
+      track.add(new dev.fpv.replay.TrackKeyframe(1.0, 10.0, 2.0, 0.0,  0f,0f,0f,1f, dev.fpv.replay.TrackInterp.CATMULL_ROM));
+      track.add(new dev.fpv.replay.TrackKeyframe(2.0, 20.0, 1.0, 0.0,  0f,0f,0f,1f, dev.fpv.replay.TrackInterp.CATMULL_ROM));
+      track.add(new dev.fpv.replay.TrackKeyframe(3.0, 30.0, 3.0, 0.0,  0f,0f,0f,1f, dev.fpv.replay.TrackInterp.CATMULL_ROM));
+      var pose = new dev.fpv.replay.TrackPose();
+
+      // exact pass-through at keyframe times
+      track.sample(1.0, pose);
+      check("CR passes through keyframe t=1 (x=10)", Math.abs(pose.getX()-10.0)<1e-6, "x="+pose.getX());
+      track.sample(2.0, pose);
+      check("CR passes through keyframe t=2 (y=1)", Math.abs(pose.getY()-1.0)<1e-6, "y="+pose.getY());
+
+      // mid-sample finite & smooth (monotonic x between 0 and 30)
+      double prevX = -1; boolean mono = true; boolean finite = true; boolean bounded = true;
+      for (int ms = 0; ms <= 300; ms++) {
+        double t = ms * 0.01;
+        track.sample(t, pose);
+        if (!Double.isFinite(pose.getX()) || !Double.isFinite(pose.getY())) finite = false;
+        if (pose.getX() < prevX - 0.5) mono = false;
+        if (pose.getX() < -1e-6 || pose.getX() > 30.0001) bounded = false;
+        prevX = pose.getX();
+      }
+      System.out.println("    CR t=1.5 -> x="+String.format("%.3f", trackSampleX(track,1.5))+" finite="+finite+" monoX="+mono);
+      check("CR mid-samples finite", finite, "");
+      check("CR x monotonic-ish (no self-intersection)", mono, "");
+      check("CR stays within endpoint range (no overshoot)", bounded, "x="+prevX);
+      check("CR t=1.5 x between 10 and 20", trackSampleX(track,1.5)>10.0 && trackSampleX(track,1.5)<20.0, "x="+trackSampleX(track,1.5));
+
+      // Linear interp: exactly straight between k1,k2
+      var lin = new dev.fpv.replay.CinematicTrack();
+      lin.add(new dev.fpv.replay.TrackKeyframe(0.0, 0.0,0.0,0.0, 0f,0f,0f,1f, dev.fpv.replay.TrackInterp.LINEAR));
+      lin.add(new dev.fpv.replay.TrackKeyframe(2.0, 100.0,0.0,0.0, 0f,0f,0f,1f, dev.fpv.replay.TrackInterp.LINEAR));
+      lin.add(new dev.fpv.replay.TrackKeyframe(4.0, 0.0,0.0,0.0, 0f,0f,0f,1f, dev.fpv.replay.TrackInterp.LINEAR));
+      lin.sample(1.0, pose);
+      check("Linear t=1 -> x=50 (straight)", Math.abs(pose.getX()-50.0)<1e-6, "x="+pose.getX());
+
+      // Cubic interp finite & passes endpoints
+      lin.getKeyframes().get(1).setInterp(dev.fpv.replay.TrackInterp.CUBIC);
+      lin.sample(1.0, pose);
+      check("Cubic finite at midpoint", Double.isFinite(pose.getX()) && pose.getX()>0, "x="+pose.getX());
+
+      // orientation slerp: two different quats, midpoint = shortest-arc
+      var sl = new dev.fpv.replay.CinematicTrack();
+      sl.add(new dev.fpv.replay.TrackKeyframe(0.0, 0.0,0.0,0.0, 0f,0f,0f,1f, dev.fpv.replay.TrackInterp.LINEAR));
+      sl.add(new dev.fpv.replay.TrackKeyframe(2.0, 0.0,0.0,0.0, 0.7071f,0f,0f,0.7071f, dev.fpv.replay.TrackInterp.LINEAR));
+      sl.sample(1.0, pose);
+      System.out.println("    slerp mid q=("+String.format("%.3f,%.3f,%.3f,%.3f", pose.getQ().x, pose.getQ().y, pose.getQ().z, pose.getQ().w)+")");
+      check("slerp midpoint w finite ~0.92", Math.abs(pose.getQ().w - 0.9239f) < 0.02, "w="+pose.getQ().w);
+
+      // sidecar save -> load round-trip
+      java.nio.file.Path tmp;
+      try { tmp = java.nio.file.Files.createTempDirectory("fpr2"); }
+      catch (java.io.IOException ex) { throw new RuntimeException(ex); }
+      var fpr = tmp.resolve("rec_x.fpr");
+      dev.fpv.replay.CinematicTrack.Companion.saveSidecar(fpr, track);
+      var loaded = dev.fpv.replay.CinematicTrack.Companion.loadSidecar(fpr);
+      check("sidecar round-trip keeps 4 keyframes", loaded.getKeyframes().size()==4, "n="+loaded.getKeyframes().size());
+      check("sidecar round-trip t=3 x=30", Math.abs(loaded.getKeyframes().get(3).getX()-30.0)<1e-6, "x="+loaded.getKeyframes().get(3).getX());
+      check("no sidecar .tmp leftover", tmp.toFile().listFiles((f,n)->n.endsWith(".tmp")).length==0, "");
+
+      // canvas aspect math
+      var c169 = dev.fpv.replay.CinematicExport.INSTANCE.canvasFor("1080p","16:9");
+      var c239 = dev.fpv.replay.CinematicExport.INSTANCE.canvasFor("1080p","2.39:1");
+      var c11  = dev.fpv.replay.CinematicExport.INSTANCE.canvasFor("1080p","1:1");
+      var c45  = dev.fpv.replay.CinematicExport.INSTANCE.canvasFor("1080p","4:5");
+      System.out.println("    canvas 16:9="+c169.getFirst()+"x"+c169.getSecond()+" 2.39:1="+c239.getFirst()+"x"+c239.getSecond()+" 1:1="+c11.getFirst()+"x"+c11.getSecond()+" 4:5="+c45.getFirst()+"x"+c45.getSecond());
+      check("16:9 1080p = 1920x1080", c169.getFirst()==1920 && c169.getSecond()==1080, c169.toString());
+      check("1:1 1080p = 1080x1080", c11.getFirst()==1080 && c11.getSecond()==1080, c11.toString());
+      check("4:5 1080p = 864x1080", c45.getFirst()==864 && c45.getSecond()==1080, c45.toString());
+      check("all canvas dims even", (c239.getFirst()&1)==0 && (c239.getSecond()&1)==0, "");
+
+      // RC overlay mapping
+      var sp = dev.fpv.replay.StickOverlay.INSTANCE.stickPos(0f, 0f);
+      check("stick centered -> (0.5,0.5)", Math.abs(sp.getFirst()-0.5f)<1e-6 && Math.abs(sp.getSecond()-0.5f)<1e-6, sp.toString());
+      var sp2 = dev.fpv.replay.StickOverlay.INSTANCE.stickPos(1f, -1f);
+      check("stick full-right/up -> (1.0, 0.0)", Math.abs(sp2.getFirst()-1f)<1e-6 && Math.abs(sp2.getSecond()-0f)<1e-6, sp2.toString());
+      check("throttle mid -> 0.5", Math.abs(dev.fpv.replay.StickOverlay.INSTANCE.throttleFill(0f)-0.5f)<1e-6, "");
     }
 
     System.out.println("\n========================================");

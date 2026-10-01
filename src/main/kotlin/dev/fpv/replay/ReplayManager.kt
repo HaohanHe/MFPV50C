@@ -51,6 +51,16 @@ object ReplayManager {
         0f, 0f, 0f, 0f, 0f, 0f, 0f, false, 0, FloatArray(ReplaySample.AUX_SLOTS),
     )
 
+    /** Cinematic keyframe track for the loaded replay (empty = follow recorded flight). */
+    var track: CinematicTrack = CinematicTrack()
+        private set
+
+    /** When true, [cameraTransform] follows the keyframe spline instead of the recorded pose. */
+    var trackActive: Boolean = false
+        set(value) { field = value && !track.isEmpty() }
+
+    private val trackSample = TrackPose()
+
     val active: Boolean get() = playing && file != null
 
     val durationSec: Double get() = file?.durationSec ?: 0.0
@@ -59,6 +69,8 @@ object ReplayManager {
         return try {
             stop()
             file = ReplayFile.read(path)
+            track = CinematicTrack.loadSidecar(path)
+            trackActive = !track.isEmpty()
             cursorSec = 0.0
             paused = false
             playing = true
@@ -137,6 +149,11 @@ object ReplayManager {
     fun cameraTransform(eyeHeight: Float): Pair<Vec3, Quaternionf>? {
         val f = file ?: return null
         if (!active || view == ReplayView.FREE) return null
+        // Keyframe spline track overrides the recorded camera when active.
+        if (trackActive && !track.isEmpty()) {
+            val tp = trackSample.apply { track.sample(cursorSec, this) }
+            return Vec3(tp.x, tp.y, tp.z) to Quaternionf(tp.q)
+        }
         val s = f.sampleAt(cursorSec, scratch)
         val q = s.attitude(Quaternionf())
 

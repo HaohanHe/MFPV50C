@@ -53,6 +53,28 @@ object CinematicExport {
 
     // ---- public control -------------------------------------------------
 
+    /** Aspect ratio of a named aspect string (data-driven; defaults to 2.39:1). */
+    fun aspectOf(aspect: String): Double = when (aspect) {
+        "16:9" -> 16.0 / 9.0
+        "9:16" -> 9.0 / 16.0
+        "2.35:1" -> 2.35
+        "21:9" -> 21.0 / 9.0
+        "4:5" -> 4.0 / 5.0
+        "1:1" -> 1.0
+        else -> 2.39
+    }
+
+    /** Even canvas (w,h) for a named resolution + aspect (yuv420p-safe). Headless-testable. */
+    fun canvasFor(resolution: String, aspect: String): Pair<Int, Int> {
+        val baseH = when (resolution) {
+            "720p" -> 720; "1440p" -> 1440; "2160p" -> 2160
+            else -> 1080
+        }
+        var h = baseH; if (h and 1 == 1) h -= 1
+        var w = floor(h * aspectOf(aspect)).toInt(); if (w and 1 == 1) w -= 1
+        return w to h
+    }
+
     /** Locate ffmpeg: explicit path from config, else PATH lookup. */
     fun detectFfmpeg(): String? {
         val cfgPath = (FpvClient.config.export ?: ExportConfig()).ffmpegPath.trim()
@@ -173,13 +195,7 @@ object CinematicExport {
                 "720p" -> 720; "1440p" -> 1440; "2160p" -> 2160
                 else -> 1080
             }
-            targetAspect = when (cfg.aspect) {
-                "16:9" -> 16.0 / 9.0
-                "9:16" -> 9.0 / 16.0
-                "2.35:1" -> 2.35
-                "21:9" -> 21.0 / 9.0
-                else -> 2.39 // "2.39:1" / anamorphic DCP
-            }
+            targetAspect = aspectOf(cfg.aspect)
             canvasH = even(baseH)
             canvasW = even(floor(canvasH * targetAspect).toInt())
             pngDir = FabricLoader.getInstance().gameDir
