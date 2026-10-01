@@ -193,6 +193,21 @@ public class FlightControlCheck {
     return new ServerCompatLogic(remoteCfg()).speedLimitGain((float) speedBpt);
   }
 
+  /** Instant ACRO roll setpoint (dps) for a given rate type, smoothing/PID off. */
+  static double acroSetpointForType(String rateType, float roll) {
+    FpvConfig cfg = new FpvConfig();
+    cfg.setRateType(rateType);
+    cfg.setSetpointSmoothingEnabled(false);
+    cfg.setPhysicsRealism("ARCADE");
+    if (cfg.getPid() != null) cfg.getPid().setEnabled(false);
+    FlightController fc = new FlightController(cfg);
+    fc.engage(0f, 0f);
+    StickChannels c = sticks();
+    c.roll = roll; c.throttle = 0.5f;
+    fc.step(c, (float) DT, 0.5f);
+    return fc.getSetpointRates()[1]; // roll channel
+  }
+
   public static void main(String[] a) {
     System.out.println("=== REAL FlightController headless verification (dt=" + DT + "s) ===");
 
@@ -446,6 +461,70 @@ public class FlightControlCheck {
       int dy1 = OsdLayoutMath.INSTANCE.groupDyPx(q); int rows1 = OsdLayoutMath.INSTANCE.ladderTickRows().length;
       int dy2 = OsdLayoutMath.INSTANCE.groupDyPx(q); int rows2 = OsdLayoutMath.INSTANCE.ladderTickRows().length;
       check("OSD layout deterministic frame-to-frame", dy1==dy2 && rows1==rows2, "dy="+dy1);
+    }
+
+    // ---------- 13. Betaflight CLI import: actual + legacy samples, error capture ----------
+    System.out.println("\n[13] Betaflight CLI import (actual + legacy + out-of-range error)");
+    {
+      String actual =
+        "set rates_type = ACTUAL\n" +
+        "set roll_rc_rate = 7.00\n" +
+        "set pitch_rc_rate = 7.00\n" +
+        "set yaw_rc_rate = 7.00\n" +
+        "set roll_super_rate = 67.00\n" +
+        "set pitch_super_rate = 67.00\n" +
+        "set yaw_super_rate = 67.00\n" +
+        "set roll_expo = 0.00\n" +
+        "set throttle_mid = 1500\n" +
+        "set throttle_expo = 0\n" +
+        "set motor_idle = 6.0\n" +
+        "set roll_p = 45\n" +
+        "set roll_i = 80\n" +
+        "set roll_d = 30\n" +
+        "set roll_f = 120\n" +
+        "set serial_port_1_speed = 115200\n" +
+        "set roll_rc_rate = 30.0\n";   // duplicate out-of-range -> error (center=300 > 250)
+      FpvConfig cfg = new FpvConfig();
+      dev.fpv.flight.BfImportResult res = dev.fpv.flight.BetaflightCli.INSTANCE.importInto(actual, cfg);
+      System.out.printf("    rateType=%s roll.center=%.1f roll.max=%.1f thrMid=%.1f minThr=%.3f roll.P=%.0f errors=%d skipped=%d%n",
+        cfg.getRateType(), cfg.getRoll().getCenter(), cfg.getRoll().getMax(),
+        cfg.getThrMidPct(), cfg.activeAirframe().getMinThrottle(),
+        cfg.getPid().getRoll().getP(), res.getErrors().size(), res.getSkippedUnrelated());
+      check("BF import sets rateType=ACTUAL", "ACTUAL".equals(cfg.getRateType()), cfg.getRateType());
+      check("BF actual roll center=70 dps", Math.abs(cfg.getRoll().getCenter()-70f) < 1f, "c="+cfg.getRoll().getCenter());
+      check("BF actual roll max=670 dps", Math.abs(cfg.getRoll().getMax()-670f) < 1f, "m="+cfg.getRoll().getMax());
+      check("BF throttle_mid 1500 -> thrMidPct=50", Math.abs(cfg.getThrMidPct()-50f) < 0.5f, "mid="+cfg.getThrMidPct());
+      check("BF motor_idle 6% -> minThrottle=0.06", Math.abs(cfg.activeAirframe().getMinThrottle()-0.06f) < 0.005f, "");
+      check("BF roll_p=45 applied", cfg.getPid().getRoll().getP() == 45f, "P="+cfg.getPid().getRoll().getP());
+      check("out-of-range line captured as error (not silent)", res.getErrors().size() >= 1, "errs="+res.getErrors());
+      check("unrelated dump line skipped (counted)", res.getSkippedUnrelated() >= 1, "skip="+res.getSkippedUnrelated());
+
+      String legacy =
+        "set rates_type = BETAFLIGHT\n" +
+        "set rc_rate = 2.0\n" +
+        "set rc_expo = 0.10\n" +
+        "set roll_super_rate = 0.70\n";
+      dev.fpv.flight.BfImportResult res2 = dev.fpv.flight.BetaflightCli.INSTANCE.importInto(legacy, cfg);
+      System.out.printf("    legacy: rateType=%s roll.rcRate=%.2f roll.superRate=%.2f roll.expo=%.2f%n",
+        cfg.getRateType(), cfg.getRoll().getRcRate(), cfg.getRoll().getSuperRate(), cfg.getRoll().getExpo());
+      check("BF legacy sets rateType=LEGACY", "LEGACY".equals(cfg.getRateType()), cfg.getRateType());
+      check("BF legacy rc_rate=2.0 -> roll.rcRate=2.0", Math.abs(cfg.getRoll().getRcRate()-2.0f) < 0.01f, "");
+      check("BF legacy roll_super_rate=0.70", Math.abs(cfg.getRoll().getSuperRate()-0.70f) < 0.01f, "");
+      check("BF legacy rc_expo=0.10 -> roll.expo", Math.abs(cfg.getRoll().getExpo()-0.10f) < 0.01f, "e="+cfg.getRoll().getExpo());
+    }
+
+    // ---------- 14. rate-type selector: same stick -> different setpoint per type ----------
+    System.out.println("\n[14] Rate-type selector: ACRO setpoint varies with ACTUAL/LEGACY/QUICK");
+    {
+      double spActual = acroSetpointForType("ACTUAL", 0.5f);
+      double spLegacy = acroSetpointForType("LEGACY", 0.5f);
+      double spQuick  = acroSetpointForType("QUICK", 0.5f);
+      System.out.printf("    roll=0.5: ACTUAL=%.1f LEGACY=%.1f QUICK=%.1f dps%n", spActual, spLegacy, spQuick);
+      check("ACTUAL mid-stick setpoint finite > 0", spActual > 50 && spActual < 400, "act="+String.format("%.1f", spActual));
+      check("LEGACY differs from ACTUAL at mid-stick", Math.abs(spLegacy - spActual) > 20, "leg="+String.format("%.1f", spLegacy));
+      check("QUICK differs from ACTUAL at mid-stick (expo bend)", Math.abs(spQuick - spActual) > 20, "qck="+String.format("%.1f", spQuick));
+      double spFull = acroSetpointForType("ACTUAL", 1f);
+      check("full-stick ACTUAL reaches ~max (670)", Math.abs(spFull - 670f) < 30, "full="+String.format("%.1f", spFull));
     }
 
     System.out.println("\n========================================");

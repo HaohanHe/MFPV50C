@@ -38,6 +38,15 @@ object Defaults {
     const val RATE_MAX = 670f
     const val RATE_EXPO = 0f
 
+    // ---- Rate-type selector (ACTUAL / LEGACY / QUICK) ----
+    const val RATES_TYPE_ACTUAL = "ACTUAL"
+    const val RATES_TYPE_LEGACY = "LEGACY"
+    const val RATES_TYPE_QUICK = "QUICK"
+
+    // ---- Legacy (Betaflight rcRate/superRate) published configurator defaults ----
+    const val LEGACY_RC_RATE = 2.0f
+    const val LEGACY_SUPER_RATE = 0.7f
+
     // ---- Translational / fallback input (engineering starting values) ----
     const val MOUSE_SENSITIVITY = 28f
     const val IDLE_THROTTLE = 0.15f

@@ -10,6 +10,7 @@
 package dev.fpv.client.gui
 
 import dev.fpv.client.FpvClient
+import dev.fpv.flight.Defaults
 import dev.fpv.flight.FlightMode
 import dev.fpv.flight.FlightFunction
 import dev.fpv.flight.ModeBinding
@@ -336,6 +337,29 @@ class FpvConfigScreen(private val parent: Screen?) :
             btn.message = Component.literal(label())
             addRenderableWidget(btn)
         }
+        y += rowH
+
+        // Rate-type selector (ACTUAL / LEGACY / QUICK).
+        run {
+            val order = listOf(Defaults.RATES_TYPE_ACTUAL, Defaults.RATES_TYPE_LEGACY, Defaults.RATES_TYPE_QUICK)
+            lateinit var btn: Button
+            fun label(): String = "Rates: " + cfg.rateType
+            btn = Button.builder(Component.literal("")) {
+                val next = order[(order.indexOf(cfg.rateType).let { if (it < 0) 0 else it } + 1) % order.size]
+                cfg.rateType = next
+                btn.message = Component.literal(label())
+            }.bounds(leftX, y, colW, 18).build()
+            btn.message = Component.literal(label())
+            addRenderableWidget(btn)
+        }
+        y += rowH
+
+        // Betaflight CLI import entry.
+        addRenderableWidget(
+            Button.builder(Component.literal("Import BF CLI…")) {
+                minecraft.setScreen(BfImportScreen(this))
+            }.bounds(leftX, y, colW, 18).build()
+        )
         y += rowH
 
         // right column: battery + failsafe + logging + multiplayer

@@ -236,12 +236,9 @@ class FlightController(val cfg: FpvConfig = FpvConfig()) {
             val cmd = FloatArray(3)
             when (currentMode) {
                 FlightMode.ACRO -> {
-                    cmd[BodyAxis.PITCH.index] =
-                        Rates.actual(p, cfg.pitch.center, cfg.pitch.max, cfg.pitch.expo)
-                    cmd[BodyAxis.ROLL.index] =
-                        Rates.actual(r, cfg.roll.center, cfg.roll.max, cfg.roll.expo)
-                    cmd[BodyAxis.YAW.index] =
-                        Rates.actual(sy, cfg.yaw.center, cfg.yaw.max, cfg.yaw.expo)
+                    cmd[BodyAxis.PITCH.index] = rateMap(p, cfg.pitch, cfg.rateType)
+                    cmd[BodyAxis.ROLL.index] = rateMap(r, cfg.roll, cfg.rateType)
+                    cmd[BodyAxis.YAW.index] = rateMap(sy, cfg.yaw, cfg.rateType)
                 }
                 FlightMode.ANGLE -> {
                     val eff = StickChannels(r, p, sy, ch.throttle, ch.aux, ch.present, ch.sourceName)
@@ -261,12 +258,9 @@ class FlightController(val cfg: FpvConfig = FpvConfig()) {
             val cmd = FloatArray(3)
             when (currentMode) {
                 FlightMode.ACRO -> {
-                    cmd[BodyAxis.PITCH.index] =
-                        Rates.actual(ch.pitch, cfg.pitch.center, cfg.pitch.max, cfg.pitch.expo)
-                    cmd[BodyAxis.ROLL.index] =
-                        Rates.actual(ch.roll, cfg.roll.center, cfg.roll.max, cfg.roll.expo)
-                    cmd[BodyAxis.YAW.index] =
-                        Rates.actual(ch.yaw, cfg.yaw.center, cfg.yaw.max, cfg.yaw.expo)
+                    cmd[BodyAxis.PITCH.index] = rateMap(ch.pitch, cfg.pitch, cfg.rateType)
+                    cmd[BodyAxis.ROLL.index] = rateMap(ch.roll, cfg.roll, cfg.rateType)
+                    cmd[BodyAxis.YAW.index] = rateMap(ch.yaw, cfg.yaw, cfg.rateType)
                 }
                 FlightMode.ANGLE -> {
                     val ar = angle.angleRates(ch, attitude, dt, cfg)
@@ -278,6 +272,23 @@ class FlightController(val cfg: FpvConfig = FpvConfig()) {
                 }
             }
             integrate(cmd, dt, throttleCmd)
+        }
+    }
+
+    /**
+     * Stick deflection [-1,1] -> commanded body rate [deg/s], dispatched by the
+     * configured rate type (ACTUAL / LEGACY / QUICK). All three branches are
+     * clean-room reimplementations of the published Betaflight rate models.
+     */
+    private fun rateMap(x: Float, axis: AxisRates, rateType: String): Float {
+        val v = if (x.isFinite()) x.coerceIn(-1f, 1f) else 0f
+        return when (rateType) {
+            Defaults.RATES_TYPE_LEGACY ->
+                Rates.legacy(v, axis.rcRate, axis.superRate, axis.expo)
+            Defaults.RATES_TYPE_QUICK ->
+                Rates.quick(v, axis.center, axis.max, axis.expo)
+            else ->
+                Rates.actual(v, axis.center, axis.max, axis.expo)
         }
     }
 

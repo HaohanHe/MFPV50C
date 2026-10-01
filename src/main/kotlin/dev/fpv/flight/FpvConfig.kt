@@ -19,12 +19,16 @@ import java.nio.file.Path
 
 /** Per-axis actual-rates parameters (published rate-model configurator units). */
 data class AxisRates(
-    /** Center sensitivity, deg/s (published default 70). */
+    /** Center sensitivity, deg/s (published default 70). Used by ACTUAL/QUICK. */
     var center: Float = Defaults.RATE_CENTER,
-    /** Max rate at full stick, deg/s (published default 670). */
+    /** Max rate at full stick, deg/s (published default 670). Used by ACTUAL/QUICK. */
     var max: Float = Defaults.RATE_MAX,
-    /** Expo 0..1 (published default 0). */
+    /** Expo 0..1 (published default 0). Used by all three rate types. */
     var expo: Float = Defaults.RATE_EXPO,
+    /** Legacy-only rcRate 0.1..2.5 (published default 2.0). Ignored by ACTUAL/QUICK. */
+    var rcRate: Float = Defaults.LEGACY_RC_RATE,
+    /** Legacy-only superRate 0..1 (published default 0.7). Ignored by ACTUAL/QUICK. */
+    var superRate: Float = Defaults.LEGACY_SUPER_RATE,
 )
 
 /** Virtual-pack battery parameters (clean-room; no real divider hardware here). */
@@ -273,6 +277,13 @@ class FpvConfig {
     var roll = AxisRates()
     var pitch = AxisRates()
     var yaw = AxisRates()
+
+    /**
+     * Stick-to-rate model: ACTUAL (published actual rates, default), LEGACY
+     * (Betaflight rcRate/superRate) or QUICK (RaceFlight-style). Consumed by the
+     * ACRO setpoint map; ANGLE/HORIZON wrap the same map via AngleController.
+     */
+    var rateType: String = Defaults.RATES_TYPE_ACTUAL
 
     /** Mouse delta (pixels per frame) -> stick deflection gain (fallback input). */
     var mouseSensitivity = Defaults.MOUSE_SENSITIVITY

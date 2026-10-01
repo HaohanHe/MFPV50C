@@ -6,6 +6,30 @@ Semantic Versioning; `main` is the development branch and `stable` points at the
 latest fully verified (zero-warning build + all verification scripts PASS)
 revision. No formal GitHub Release is published until real-hardware acceptance.
 
+## [Unreleased] — E2E audit fixes: BF CLI import + rate-type selector
+
+### Added
+- **Betaflight CLI import** (`flight/BetaflightCli.kt`, clean-room parser of the public
+  `set name = value` text format): per-axis rc_rate/super_rate/expo, global rc_rate/
+  rc_expo/rc_yaw_expo, throttle_mid/throttle_expo/throttle_limit_type/percent,
+  per-axis roll/pitch/yaw P/I/D/F, motor_idle, tpa_rate/tpa_breakpoint. Out-of-range
+  values and unknown domain names are reported explicitly (never silently dropped);
+  unrelated dump noise (serial/vtx/rx/led) is skipped and counted. UI: advanced page
+  "Import BF CLI…" button opens `BfImportScreen` (paste box + Import + results).
+- **Rate-type selector** (`FpvConfig.rateType` = ACTUAL/LEGACY/QUICK, default ACTUAL):
+  the ACRO setpoint map now branches on the selected type, activating the previously
+  dead `Rates.legacy` (rcRate/superRate) and `Rates.quick` branches. BF import sets
+  rateType automatically. GUI cycle button on the advanced page.
+
+### Fixed
+- `AxisRates` gained legacy-only `rcRate`/`superRate` fields (defaults 2.0/0.7);
+  ACTUAL/QUICK behaviour unchanged (default values identical to before).
+
+### Verification
+- headless [13] actual+legacy CLI samples parse correctly, out-of-range line captured;
+  [14] same roll=0.5 stick yields ACTUAL=185 / LEGACY=308 / QUICK=335 dps (all finite,
+  mutually distinct, full-stick ACTUAL=670). Zero-warning build.
+
 ## [Unreleased] — quadcopter feel + firework-beat & high-speed root causes
 
 ### Root causes found (bytecode / headless, not guessed)
