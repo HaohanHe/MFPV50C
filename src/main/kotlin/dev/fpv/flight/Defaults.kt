@@ -8,6 +8,14 @@
 package dev.fpv.flight
 
 object Defaults {
+    /**
+     * Pure decision: while armed + active, at-or-below hover collective the net vertical
+     * force is downward (gravity not canceled) -> the craft must descend instead of the
+     * vanilla creative zero-gravity hover. Disarmed / inactive -> no override.
+     */
+    fun shouldDescendWhen(armed: Boolean, active: Boolean, throttle: Float, hoverThrottle: Float): Boolean =
+        armed && active && throttle <= hoverThrottle.coerceIn(0f, 1f)
+
 
     // ---- Raw axis / GLFW documented conventions ----
     /** GLFW documents joystick axes as normalized [-1, 1] centered at 0. */

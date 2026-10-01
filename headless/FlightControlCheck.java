@@ -1646,6 +1646,34 @@ public class FlightControlCheck {
       check("zero throttle falls (no runaway up)", d0.y() < 0f, ""+d0.y());
     }
 
+    // ---------- 49. Softened thrust law: hover raised, small-stick gain reduced ----------
+    System.out.println("\n[49] softened quadratic thrust law");
+    {
+      FpvConfig cfg = new FpvConfig();
+      var af = cfg.activeAirframe();
+      float hoverT = af.effectiveHoverThrottle();
+      // derivative of thrust law at hover: d(linear*t+quad*t^2)/dt.
+      float lin=0.65f, quad=0.35f;
+      float d = lin + 2*quad*hoverT;
+      System.out.printf("    hoverThrottle=%.3f (was 0.133), dThrust/dt@hover=%.3f (was 1.0)%n", hoverT, d);
+      check("hover raised above 0.133", hoverT > 0.16f, ""+hoverT);
+      check("small-stick vertical gain reduced vs old linear(1.0)", d < 0.95f, ""+d);
+      // monotonic across range
+      float prev=0f; boolean cont=true;
+      for(float t=0f;t<=1.001f;t+=0.02f){ float th=af.totalThrustN(t); if(th<prev-0.01f) cont=false; prev=th; }
+      check("quadratic law monotonic/continuous", cont, "");
+    }
+
+    // ---------- 50. Creative-mode descend gating (pure decision) ----------
+    System.out.println("\n[50] creative descend gating");
+    {
+      var D = dev.fpv.flight.Defaults.INSTANCE;
+      check("armed active at/below hover -> descend", D.shouldDescendWhen(true, true, 0.10f, 0.186f), "");
+      check("above hover -> no forced descend", !D.shouldDescendWhen(true, true, 0.5f, 0.186f), "");
+      check("disarmed -> no override", !D.shouldDescendWhen(false, true, 0.10f, 0.186f), "");
+      check("inactive -> no override", !D.shouldDescendWhen(true, false, 0.10f, 0.186f), "");
+    }
+
     System.out.println("\n========================================");
     System.out.println(failures == 0 ? "ALL TESTS PASS" : ("FAILURES: " + failures));
     System.exit(failures == 0 ? 0 : 1);

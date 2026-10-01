@@ -770,7 +770,7 @@ class FpvConfig {
                 massKg = 0.65f
                 inertiaXX = 0.0025f; inertiaYY = 0.0030f; inertiaZZ = 0.0045f
                 motorCount = 4; maxThrustPerMotorN = 12.0f
-                thrustLinear = 1.0f; thrustQuad = 0.0f
+                thrustLinear = 0.65f; thrustQuad = 0.35f
                 propInch = 5.1f; propPitch = 4.6f; motorKv = 1900
                 cameraTiltDeg = 25f; minThrottle = 0.055f
                 thrLow = 0.95f; thrMid = 0.95f; thrHigh = 1.05f
