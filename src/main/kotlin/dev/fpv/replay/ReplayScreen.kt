@@ -59,6 +59,10 @@ class ReplayScreen(private val parent: Screen?) :
         addBtn(rx, ty, 90, 18, "gui.fpv.replay.export") {
             if (ReplayManager.file == null) toast("load a replay first")
             else minecraft.setScreen(ExportScreen(this))
+        }; ty += 22
+        addBtn(rx, ty, 90, 18, "Cameras...") {
+            if (ReplayManager.file == null) toast("load a replay first")
+            else minecraft.setScreen(CinematicEditorScreen(this))
         }; ty += 24
 
         addBtn(12, height - 26, 110, 18, "gui.fpv.replay.close") { onClose() }

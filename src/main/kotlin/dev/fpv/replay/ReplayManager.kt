@@ -189,4 +189,45 @@ object ReplayManager {
         val s = t.toInt()
         return String.format("%d:%02d.%03d", s / 60, s % 60, ((t - s) * 1000).toInt())
     }
+
+    // ---- cinematic keyframe editing -------------------------------------
+
+    /** Build a keyframe at the current cursor from the recorded pose (or null when no file). */
+    fun keyframeFromCurrent(interp: TrackInterp = TrackInterp.CATMULL_ROM): TrackKeyframe? {
+        val f = file ?: return null
+        val s = f.sampleAt(cursorSec, scratch)
+        return TrackKeyframe(
+            cursorSec, s.x, s.y, s.z, s.qx, s.qy, s.qz, s.qw, interp,
+        )
+    }
+
+    /** Add-or-update a keyframe at the current time. Returns the affected index. */
+    fun upsertKeyframeHere(): Int {
+        val kf = keyframeFromCurrent() ?: return -1
+        // Update an existing keyframe within 20ms instead of duplicating.
+        val existing = track.keyframes.indexOfFirst { kotlin.math.abs(it.tSec - cursorSec) < 0.02 }
+        if (existing >= 0) {
+            val old = track.keyframes[existing]
+            old.x = kf.x; old.y = kf.y; old.z = kf.z
+            old.qx = kf.qx; old.qy = kf.qy; old.qz = kf.qz; old.qw = kf.qw
+            return existing
+        }
+        return track.add(kf)
+    }
+
+    fun deleteKeyframeAt(i: Int) = track.removeAt(i)
+
+    /** Cycle the interpolator of keyframe [i]; returns its new label. */
+    fun cycleKeyframeInterp(i: Int): String {
+        val k = track.keyframes[i]
+        k.interp = TrackInterp.entries[(k.interp.ordinal + 1) % TrackInterp.entries.size]
+        trackActive = true
+        return k.interp.name
+    }
+
+    /** Persist the current track to its sidecar (atomic). */
+    fun saveTrack(): Boolean {
+        val f = file ?: return false
+        return try { CinematicTrack.saveSidecar(f.path, track); true } catch (_: Exception) { false }
+    }
 }
