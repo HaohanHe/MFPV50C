@@ -51,6 +51,8 @@ class CalibrationScreen(private val parent: Screen?) :
         Target("cal.fpv.yaw", channel = StickChannels.YAW, kind = TKind.ANALOG),
         Target("cal.fpv.ls", auxName = "LS", kind = TKind.ANALOG),
         Target("cal.fpv.rs", auxName = "RS", kind = TKind.ANALOG),
+        Target("cal.fpv.s1", auxName = "S1", kind = TKind.ANALOG),
+        Target("cal.fpv.s2", auxName = "S2", kind = TKind.ANALOG),
         Target("cal.fpv.sa", auxName = "SA", kind = TKind.SWITCH),
         Target("cal.fpv.sb", auxName = "SB", kind = TKind.SWITCH),
         Target("cal.fpv.sc", auxName = "SC", kind = TKind.SWITCH),

@@ -553,6 +553,41 @@ public class FlightControlCheck {
         intervalBefore + "->" + intervalAfter);
     }
 
+    // ---------- 16. Continuous-axis aux (S1/S2/LS/RS) binding path ----------
+    System.out.println("\n[16] Continuous aux axis routed via Modes table (S1 -> ANGLE)");
+    {
+      dev.fpv.flight.ModesController modes = new dev.fpv.flight.ModesController();
+      dev.fpv.flight.ModeBinding b = new dev.fpv.flight.ModeBinding();
+      b.setFunction("ANGLE"); b.setSourceKind("AUX"); b.setSourceName("S1");
+      b.setActiveLow(0.5f); b.setActiveHigh(1f);
+      java.util.List<dev.fpv.flight.ModeBinding> rows = java.util.List.of(b);
+
+      // knob S1 high (>0.5): ANGLE should engage
+      StickChannels high = sticks();
+      high.auxChannels = java.util.List.of(
+        new dev.fpv.input.AuxState("S1", 0.8f, -1, 0, "AXIS", "Axis 9", true));
+      dev.fpv.flight.ModesResult rHigh = modes.evaluate(high, rows);
+
+      // knob S1 low (<0.5): ANGLE must disengage
+      StickChannels low = sticks();
+      low.auxChannels = java.util.List.of(
+        new dev.fpv.input.AuxState("S1", 0.2f, -1, 0, "AXIS", "Axis 9", true));
+      dev.fpv.flight.ModesResult rLow = modes.evaluate(low, rows);
+
+      // unknown/unbound channel at full value: must NOT participate
+      StickChannels unbound = sticks();
+      unbound.auxChannels = java.util.List.of(
+        new dev.fpv.input.AuxState("S99", 1.0f, -1, 0, "AXIS", "Axis 13", false));
+      dev.fpv.flight.ModesResult rUb = modes.evaluate(unbound, rows);
+
+      System.out.printf("    S1=0.8 mode=%s | S1=0.2 mode=%s | unbound=1.0 mode=%s%n",
+        rHigh.getDesiredMode(), rLow.getDesiredMode(), rUb.getDesiredMode());
+      check("S1 high band engages ANGLE mode",
+        rHigh.getDesiredMode() == dev.fpv.flight.FlightMode.ANGLE, ""+rHigh.getDesiredMode());
+      check("S1 low band releases ANGLE", rLow.getDesiredMode() == null, ""+rLow.getDesiredMode());
+      check("unbound channel never participates", rUb.getDesiredMode() == null, ""+rUb.getDesiredMode());
+    }
+
     System.out.println("\n========================================");
     System.out.println(failures == 0 ? "ALL TESTS PASS" : ("FAILURES: " + failures));
     System.exit(failures == 0 ? 0 : 1);

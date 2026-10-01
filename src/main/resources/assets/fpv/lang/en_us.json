@@ -161,6 +161,8 @@
   "gui.fpv.skip": "Skip (unused)",
   "cal.fpv.ls": "Move the LEFT slider (LS)",
   "cal.fpv.rs": "Move the RIGHT slider (RS)",
+  "cal.fpv.s1": "Move knob S1 through its full range (or Skip)",
+  "cal.fpv.s2": "Move knob S2 through its full range (or Skip)",
   "cal.fpv.sa": "Toggle switch SA through ALL positions",
   "cal.fpv.sb": "Toggle switch SB through ALL positions",
   "cal.fpv.sc": "Toggle switch SC through ALL positions",

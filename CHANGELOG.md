@@ -26,6 +26,13 @@ revision. No formal GitHub Release is published until real-hardware acceptance.
   now actually invoke `ServerCompatLogic.onSetback()` — firework interval widens
   10→40 ticks and the coordinated-turn gain softens. Relative-axis deltas and small
   corrections never trip it; single-player never reaches this path.
+- **Continuous-axis binding path for S1/S2 knobs** (wizard `CalibrationScreen`):
+  move-to-bind wizard gained S1/S2 analog steps (skippable; records measured
+  min/mid/max + deadzone just like LS/RS). The bound channel becomes a named AUX
+  entry that the existing Modes page can route to any FlightFunction band (e.g.
+  ANGLE/HORIZON/HEADFREE). Default device profiles still leave S1/S2 unbound —
+  nothing is guessed; the pilot binds them once with the wizard. AuxAnalyzer itself
+  remains unused (auto-grouping of ghost buttons was not needed).
 
 ### Fixed
 - `AxisRates` gained legacy-only `rcRate`/`superRate` fields (defaults 2.0/0.7);
@@ -37,7 +44,9 @@ revision. No formal GitHub Release is published until real-hardware acceptance.
 - headless [13] actual+legacy CLI samples parse correctly, out-of-range line captured;
   [14] same roll=0.5 stick yields ACTUAL=185 / LEGACY=308 / QUICK=335 dps (all finite,
   mutually distinct, full-stick ACTUAL=670); [15] big snap fires, small/relative/
-  cooldown-suppressed cases verified, onSetback widens interval 10→40. Zero-warning build.
+  cooldown-suppressed cases verified, onSetback widens interval 10→40; [16] a
+  continuous S1 aux at 0.8 engages ANGLE, at 0.2 releases it, an unbound channel
+  never participates. Zero-warning build.
 
 ## [Unreleased] — quadcopter feel + firework-beat & high-speed root causes
 
