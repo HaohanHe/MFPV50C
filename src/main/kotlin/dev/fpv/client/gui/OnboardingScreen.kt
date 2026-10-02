@@ -36,7 +36,7 @@ class OnboardingScreen(private val parent: Screen?) :
             }
             OnboardingFlow.STEP_CALIBRATE -> {
                 btn("开始校准", cx - 130) {
-                    minecraft?.setScreen(CalibrationScreen(this))
+                    minecraft.setScreen(CalibrationScreen(this))
                 }
                 btn("下一步", cx + 10) { step = OnboardingFlow.next(step); rebuild() }
             }
@@ -74,5 +74,5 @@ class OnboardingScreen(private val parent: Screen?) :
         }
     }
 
-    override fun onClose() { minecraft?.setScreen(parent) }
+    override fun onClose() { minecraft.setScreen(parent) }
 }

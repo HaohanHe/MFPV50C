@@ -38,5 +38,5 @@ class HelpScreen(private val parent: Screen?) :
         lines.forEachIndexed { i, s -> g.drawString(font, s, 12, 16 + i * 12, 0xFFFFFF) }
     }
 
-    override fun onClose() { minecraft?.setScreen(parent) }
+    override fun onClose() { minecraft.setScreen(parent) }
 }
