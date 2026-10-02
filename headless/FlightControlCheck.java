@@ -1674,6 +1674,21 @@ public class FlightControlCheck {
       check("inactive -> no override", !D.shouldDescendWhen(true, false, 0.10f, 0.186f), "");
     }
 
+    // ---------- 51. Onboarding state machine + E2E-006 filename sanitize ----------
+    System.out.println("\n[51] onboarding + sanitize");
+    {
+      var O = dev.fpv.flight.OnboardingFlow.INSTANCE;
+      check("auto-launch when not completed", O.shouldAutoLaunch(false), "");
+      check("no relaunch once completed", !O.shouldAutoLaunch(true), "");
+      check("next increments clamp", O.next(O.STEP_FLY)==O.STEP_FLY && O.next(O.STEP_HAND)==O.STEP_CALIBRATE, "");
+      check("prev clamps at detect", O.prev(O.STEP_DETECT)==O.STEP_DETECT, "");
+      check("finish marks done", O.finished().getSkipped()==false, "");
+      var S = dev.fpv.replay.FfmpegCommand.INSTANCE;
+      check("leading dash stripped", !S.sanitizeFilename("-foo.mp4").startsWith("-"), S.sanitizeFilename("-foo.mp4"));
+      check("normal name kept", S.sanitizeFilename("my_replay.2").equals("my_replay.2"), S.sanitizeFilename("my_replay.2"));
+      check("blank -> fallback", !S.sanitizeFilename("---").startsWith("-"), S.sanitizeFilename("---"));
+    }
+
     System.out.println("\n========================================");
     System.out.println(failures == 0 ? "ALL TESTS PASS" : ("FAILURES: " + failures));
     System.exit(failures == 0 ? 0 : 1);

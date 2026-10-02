@@ -14,7 +14,9 @@ object FfmpegCommand {
     /** Sanitize a proposed file name to [A-Za-z0-9._-] only; no path separators, no '-'. */
     fun sanitizeFilename(name: String): String {
         val base = name.substringAfterLast('/').substringAfterLast('\\')
-        return ALLOWED.replace(base, "_").trim('.').ifBlank { "replay_out" }
+        val cleaned = ALLOWED.replace(base, "_").trim('.')
+        // E2E-006: never let the result start with '-' — otherwise ffmpeg reads it as a flag.
+        return cleaned.trimStart('-').ifBlank { "replay_out" }
     }
 
     /**

@@ -378,6 +378,9 @@ class FpvConfig {
     /** Transmitter hand layout 1..4, default Mode 2. */
     var handMode = 2
 
+    /** Set once the first-use wizard has been completed or skipped; stop auto-launching. */
+    var onboardingCompleted = false
+
     /**
      * Calibration per physical stick slot, indexed by StickSlot.ordinal.
      * Every slot starts unbound (axisIndex = -1); only calibration or explicit
