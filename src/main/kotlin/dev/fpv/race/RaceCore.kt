@@ -173,7 +173,9 @@ class RaceTimingCore(
             g.halfW, g.halfH, g.ring,
         )
         if (hit == 0) return
-        if (hit < 0) { eventQ.add(CoreEvent.MISSED); return } // wrong way
+        // E2E-007: wrong-way / out-of-order crossing makes the CURRENT lap invalid
+        // (F9U rules). validLapsNs already skips it at gate-0 close; reset on next lap.
+        if (hit < 0) { lapInvalid = true; eventQ.add(CoreEvent.MISSED); return }
 
         val t = now()
         // Jump start only counts if a staging/countdown window is active before GO.

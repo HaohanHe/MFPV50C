@@ -1565,7 +1565,7 @@ public class FlightControlCheck {
       for (double z=12; z>=-2; z-=0.31) { clk[0]+=30_000_000L; heat.step(0,0,z); }
       System.out.printf("    laps=%d validLaps=%d splits=%d finished=%b avg3=%d%n",
         heat.getLapsCompleted(), heat.getValidLapsNs().size(), heat.getSplitsNs().size(), heat.getFinished(), heat.avgBest3Ns());
-      check("2 laps valid", heat.getValidLapsNs().size()==2, ""+heat.getValidLapsNs().size());
+      check("wrong-way reverse legs invalidate tainted laps (E2E-007)", heat.getValidLapsNs().size()==1, ""+heat.getValidLapsNs().size());
       check("heat finished", heat.getFinished(), "");
     }
 
@@ -1692,16 +1692,33 @@ public class FlightControlCheck {
     // ---------- 52. E2E-007/009/010 race fixes ----------
     System.out.println("\n[52] race P2 fixes");
     {
-      // 007: MISSED sets lapInvalid.
-      var core = new dev.fpv.race.RaceTimingCore();
-      System.out.printf("    lapInvalid after miss=%b%n", core.getLapInvalid());
-      // 009: .bak exists after second save.
+      // 007 tested in [53]; 009 below.
       var ts = dev.fpv.race.TrackStore.INSTANCE;
       java.nio.file.Path tmp = java.nio.file.Files.createTempFile("trk",".json");
-      var doc = new dev.fpv.race.TrackDoc(); doc.name="t";
+      var doc = new dev.fpv.race.TrackDoc();
       ts.saveTo(tmp, doc); ts.saveTo(tmp, doc);
       check("009 .bak exists after rewrite", java.nio.file.Files.exists(ts.bak(tmp)), "");
       System.out.printf("    bak=%s exists=%b%n", ts.bak(tmp), java.nio.file.Files.exists(ts.bak(tmp)));
+    }
+
+    // ---------- 53. E2E-007 wrong-way -> lapInvalid ----------
+    System.out.println("\n[53] wrong-way lap invalidation");
+    {
+      long[] clk = {0L};
+      var g0 = new dev.fpv.race.CoreGate(0,0,0, 0,0,1, 1.0,1.0, false, false);
+      var heat = new dev.fpv.race.RaceTimingCore(java.util.List.of(g0), 2, 1_000_000_000_000L, 1_000L, 30_000_000_000L, 800_000_000L, true, () -> clk[0]);
+      heat.arm();
+      for (double z=-2; z<=2; z+=0.2) { clk[0]+=3e7; heat.step(0,0,z); } // forward gate0
+      System.out.printf("    after forward: lapInvalid=%b valid=%d%n", heat.getLapInvalid(), heat.getValidLapsNs().size());
+      check("clean forward lap -> lapInvalid false", !heat.getLapInvalid(), "");
+      for (double z=2; z>=-2; z-=0.2) { clk[0]+=3e7; heat.step(0,0,z); } // reverse = wrong way
+      System.out.printf("    after wrong-way: lapInvalid=%b valid=%d%n", heat.getLapInvalid(), heat.getValidLapsNs().size());
+      check("wrong-way sets lapInvalid true", heat.getLapInvalid(), "");
+      // Close that tainted lap forward: it must NOT be added to validLaps.
+      for (double z=-2; z<=2; z+=0.2) { clk[0]+=3e7; heat.step(0,0,z); }
+      System.out.printf("    after tainted lap closed: lapInvalid=%b valid=%d%n", heat.getLapInvalid(), heat.getValidLapsNs().size());
+      check("wrong-way lap excluded (only clean forward lap counted)", heat.getValidLapsNs().size()==1, ""+heat.getValidLapsNs().size());
+      check("lapInvalid reset after clean close", !heat.getLapInvalid(), "");
     }
 
     System.out.println("\n========================================");
