@@ -52,8 +52,16 @@ object TrackStore {
      */
     @JvmStatic
     fun saveTo(path: Path, doc: TrackDoc) {
+        // E2E-009: rotate the previous good file to .bak before overwriting, so a
+        // corrupted/cancelled save still leaves a restorable last-good copy.
+        try {
+            if (Files.exists(path)) Files.copy(path, bak(path), java.nio.file.StandardCopyOption.REPLACE_EXISTING)
+        } catch (_: Exception) { /* best-effort rotation; atomic write still protects */ }
         dev.fpv.flight.AtomicFiles.writeText(path, gson.toJson(doc))
     }
+
+    /** Snapshot path next to [path]. */
+    fun bak(path: Path): Path = path.resolveSibling("${path.fileName}.bak")
 
     fun load(name: String): TrackDoc? = try {
         val p = fileFor(name)

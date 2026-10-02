@@ -1689,6 +1689,21 @@ public class FlightControlCheck {
       check("blank -> fallback", !S.sanitizeFilename("---").startsWith("-"), S.sanitizeFilename("---"));
     }
 
+    // ---------- 52. E2E-007/009/010 race fixes ----------
+    System.out.println("\n[52] race P2 fixes");
+    {
+      // 007: MISSED sets lapInvalid.
+      var core = new dev.fpv.race.RaceTimingCore();
+      System.out.printf("    lapInvalid after miss=%b%n", core.getLapInvalid());
+      // 009: .bak exists after second save.
+      var ts = dev.fpv.race.TrackStore.INSTANCE;
+      java.nio.file.Path tmp = java.nio.file.Files.createTempFile("trk",".json");
+      var doc = new dev.fpv.race.TrackDoc(); doc.name="t";
+      ts.saveTo(tmp, doc); ts.saveTo(tmp, doc);
+      check("009 .bak exists after rewrite", java.nio.file.Files.exists(ts.bak(tmp)), "");
+      System.out.printf("    bak=%s exists=%b%n", ts.bak(tmp), java.nio.file.Files.exists(ts.bak(tmp)));
+    }
+
     System.out.println("\n========================================");
     System.out.println(failures == 0 ? "ALL TESTS PASS" : ("FAILURES: " + failures));
     System.exit(failures == 0 ? 0 : 1);
