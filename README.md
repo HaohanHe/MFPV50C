@@ -176,4 +176,4 @@ headless/run_headless.sh
 
 ## License / 许可
 
-[MIT](./LICENSE) — © 2026 BI4MIB（何浩然）。
+[MIT](./LICENSE) — © 2026 BI4MIB（何浩瀚）。
